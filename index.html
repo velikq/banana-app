@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Banana GenAI</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Custom Title Bar -->
+  <div id="title-bar" class="title-bar">
+    <div class="title-bar-text">
+      <i>banana.pots</i> <span class="title-vip">pro-vip-delux</span> edition
+    </div>
+    <div class="title-bar-controls">
+      <button id="btn-minimize" class="control-btn">─</button>
+      <button id="btn-maximize" class="control-btn">☐</button>
+      <button id="btn-close" class="control-btn close-btn">✕</button>
+    </div>
+  </div>
+
+  <div class="app-container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      
+      <!-- Reference Images -->
+      <div class="control-group">
+        <div class="group-header">
+          <span class="icon">📚</span>
+          <span>REFERENCE IMAGES</span>
+          <span id="ref-count" class="counter">0 / 9</span>
+        </div>
+        <div id="ref-drop-zone" class="drop-zone">
+          <div id="ref-empty-state">
+            <div class="upload-icon">↑</div>
+            <div class="upload-text">Add</div>
+            <div class="upload-subtext">Drag images here or click to upload.</div>
+          </div>
+          <div id="ref-list" class="ref-list hidden"></div>
+        </div>
+        <input type="file" id="ref-file-input" multiple accept="image/*" style="display: none;">
+      </div>
+
+      <!-- Resolution -->
+      <div class="control-group">
+        <div class="group-header">
+          <span class="icon">⛶</span>
+          <span>Resolution</span>
+        </div>
+        <div class="button-group" id="resolution-group">
+          <button class="option-btn active" data-value="1K">1K</button>
+          <button class="option-btn" data-value="2K">2K</button>
+          <button class="option-btn" data-value="4K">4K</button>
+        </div>
+      </div>
+
+      <!-- Aspect Ratio -->
+      <div class="control-group">
+        <div class="group-header">Aspect Ratio</div>
+        <div class="button-group" id="ratio-group">
+          <button class="option-btn active" data-value="1:1">1:1</button>
+          <button class="option-btn" data-value="3:4">3:4</button>
+          <button class="option-btn" data-value="4:3">4:3</button>
+          <button class="option-btn" data-value="9:16">9:16</button>
+          <button class="option-btn" data-value="16:9">16:9</button>
+        </div>
+      </div>
+
+      <!-- Prompt -->
+      <div class="control-group prompt-group">
+        <textarea id="prompt-input" placeholder="Describe your imagination..."></textarea>
+        <div class="char-count"><span id="char-counter">0</span> chars</div>
+      </div>
+
+      <!-- Restore Context -->
+      <div id="restore-drop-zone" class="restore-zone">
+        <span class="icon">↺</span>
+        <span>Drop image here to <span class="highlight">restore context</span></span>
+      </div>
+
+      <button id="reset-btn" class="secondary-btn" style="width: 100%; margin-bottom: 10px; justify-content: center;">
+        <span class="icon">⟲</span> Reset Context
+      </button>
+
+      <!-- Generate Button -->
+      <button id="generate-btn" class="primary-btn">
+        <span class="icon">⚡</span> Generate Image
+      </button>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="preview-area">
+        <div class="info-tag hidden" id="preview-tag">1K • 1:1</div>
+        
+        <div id="placeholder-state" class="placeholder-state">
+          <div class="placeholder-icon">🖼️</div>
+          <h2>Ready to create</h2>
+          <p>Generated images will appear here</p>
+        </div>
+
+        <img id="result-image" class="result-image hidden" alt="Generated Image">
+        <div id="loading-spinner" class="loading-spinner hidden"></div>
+      </div>
+
+      <div id="download-area" class="download-area hidden">
+        <button id="download-btn" class="secondary-btn">
+          <span class="icon">↓</span> Download Image
+        </button>
+      </div>
+
+      <div class="logs-area">
+        <div class="logs-header">>_ REQUEST LOGS</div>
+        <div id="logs-output" class="logs-output">Waiting for requests...</div>
+      </div>
+    </div>
+
+    <!-- Library Sidebar -->
+    <div class="library-column">
+        <div class="library-header">
+            <span class="icon">📂</span> LIBRARY <span id="library-count" style="margin-left: auto; color: var(--text-secondary);">0</span>
+        </div>
+        <div id="library-list" class="library-list">
+            <!-- Thumbnails will be injected here -->
+        </div>
+    </div>
+
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

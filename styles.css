@@ -1,0 +1,529 @@
+:root {
+  --bg-dark: #121212;
+  --bg-panel: #1e1e1e;
+  --bg-input: #2a2a2a;
+  --text-primary: #ffffff;
+  --text-secondary: #aaaaaa;
+  --accent-color: #f1c40f;
+  --accent-hover: #d4ac0d;
+  --border-color: #333333;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Custom Title Bar */
+.title-bar {
+  height: 30px;
+  background-color: var(--bg-panel);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 10px;
+  -webkit-app-region: drag; /* Make draggable */
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+}
+
+.title-bar-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.title-vip {
+    font-weight: bold;
+    color: var(--accent-color); /* Or keep white/text-primary */
+}
+
+.title-bar-controls {
+  display: flex;
+  -webkit-app-region: no-drag; /* Buttons must not be draggable */
+}
+
+.control-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  width: 40px;
+  height: 30px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.control-btn:hover {
+  background-color: #333;
+  color: white;
+}
+
+.close-btn:hover {
+  background-color: #e81123;
+  color: white;
+}
+
+.app-container {
+  display: flex;
+  height: calc(100% - 30px); /* Subtract title bar height */
+}
+
+/* Sidebar */
+.sidebar {
+  width: 320px;
+  background-color: var(--bg-panel);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-color);
+  overflow-y: auto;
+}
+
+.control-group {
+  margin-bottom: 20px;
+}
+
+.group-header {
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-transform: uppercase;
+}
+
+.counter {
+  color: var(--text-secondary);
+}
+
+/* Drop Zone */
+.drop-zone {
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  background-color: #252525;
+}
+
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent-color);
+}
+
+.upload-icon {
+  font-size: 24px;
+  margin-bottom: 5px;
+  color: var(--text-secondary);
+}
+
+.upload-text {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.upload-subtext {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 5px;
+}
+
+.ref-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  width: 100%;
+}
+
+.ref-thumb-container {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  cursor: pointer;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.ref-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ref-thumb-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: white;
+  font-weight: bold;
+  font-size: 18px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.ref-thumb-container:hover .ref-thumb-overlay {
+  opacity: 1;
+}
+
+/* Buttons */
+.button-group {
+  display: flex;
+  gap: 8px;
+}
+
+.option-btn {
+  flex: 1;
+  background-color: var(--bg-input);
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  padding: 8px 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.option-btn:hover {
+  background-color: #333;
+}
+
+.option-btn.active {
+  background-color: var(--accent-color);
+  color: #000;
+  font-weight: bold;
+}
+
+/* Prompt */
+textarea {
+  width: 100%;
+  height: 120px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 10px;
+  resize: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.char-count {
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* Restore Context */
+.restore-zone {
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  background-color: #252525;
+}
+.restore-zone.drag-over {
+    border-color: var(--accent-color);
+}
+
+.highlight {
+  color: var(--accent-color);
+}
+
+/* Generate Button */
+.primary-btn {
+  width: 100%;
+  background-color: var(--accent-color);
+  color: #000;
+  border: none;
+  padding: 14px;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.2s;
+}
+
+.primary-btn:hover {
+  background-color: var(--accent-hover);
+}
+
+.primary-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.secondary-btn {
+  background-color: #2a2a2a;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.secondary-btn:hover {
+  background-color: #333;
+  border-color: var(--accent-color);
+}
+
+.download-area {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
+}
+
+/* Main Content */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  background-color: #121212;
+}
+
+/* Library Column */
+.library-column {
+    width: 180px;
+    background-color: var(--bg-panel);
+    border-left: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+}
+
+.library-header {
+    padding: 15px 20px;
+    font-size: 12px;
+    font-weight: bold;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-color);
+    text-transform: uppercase;
+}
+
+.library-list {
+    flex-grow: 1; /* Allow it to grow */
+    height: 0; /* Important for scrollable flex items */
+    overflow-y: auto;
+    padding: 10px;
+    gap: 10px;
+    scrollbar-width: none; /* Firefox */
+}
+
+.library-list > * {
+    margin-bottom: 10px; /* Simulate gap since flex is gone */
+}
+
+.library-list::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Webkit */
+}
+
+.library-item {
+    width: 100%;
+    height: 160px; /* Fixed height */
+    background-color: #000;
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+    border: 2px solid transparent;
+}
+
+.library-item-counter {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background-color: rgba(0, 0, 0, 0.6);
+    color: white;
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    z-index: 10; /* Ensure it's above other overlays */
+}
+
+.library-item:hover {
+    border-color: var(--accent-color);
+}
+
+.library-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: contain; /* Changed from 'cover' to 'contain' */
+    display: block;
+}
+
+/* Split Overlay Zones */
+.lib-overlay-top, .lib-overlay-bottom {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: white;
+    opacity: 0;
+    transition: opacity 0.2s, background-color 0.2s;
+    cursor: pointer;
+}
+
+.lib-overlay-top {
+    top: 0;
+    background-color: rgba(0, 0, 0, 0.3); /* Slight shadow always when item hovered? Or just on zone hover? Req says "when hovering a zone it becomes darker" */
+}
+
+.lib-overlay-bottom {
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* When hovering the item itself, show base shadow */
+.library-item:hover .lib-overlay-top,
+.library-item:hover .lib-overlay-bottom {
+    opacity: 0.3; /* visible but faint text? OR just shadow? */
+}
+
+/* When hovering specific zone, make it darker and show text clearly */
+.lib-overlay-top:hover {
+    background-color: rgba(0, 0, 0, 0.8) !important;
+    opacity: 1 !important;
+}
+
+.lib-overlay-bottom:hover {
+    background-color: rgba(0, 0, 0, 0.8) !important;
+    opacity: 1 !important;
+}
+
+.preview-area {
+  flex: 1;
+  background-color: #181818; /* Slightly lighter than bg-dark for contrast */
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  /* Pattern background attempt */
+  background-image: radial-gradient(#222 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.info-tag {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  background-color: rgba(0,0,0,0.6);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  color: white;
+}
+
+.placeholder-state {
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.placeholder-icon {
+  font-size: 48px;
+  margin-bottom: 10px;
+  opacity: 0.3;
+}
+
+.result-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255,255,255,0.1);
+  border-top: 4px solid var(--accent-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  position: absolute;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Logs */
+.logs-area {
+  height: 150px;
+  background-color: #0d0d0d;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.logs-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+.logs-output {
+  flex: 1;
+  padding: 10px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 12px;
+  color: #888;
+  white-space: pre-wrap;
+}
+
+.log-entry { margin-bottom: 4px; }
+.log-info { color: #aaa; }
+.log-success { color: #4caf50; }
+.log-error { color: #f44336; }
+
+.hidden { display: none !important; }
