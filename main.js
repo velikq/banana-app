@@ -293,6 +293,26 @@ ipcMain.handle('list-output-files', () => {
     return files;
 });
 
+ipcMain.handle('list-input-files', () => {
+    const inputDir = path.join(__dirname, 'input');
+    if (!fs.existsSync(inputDir)) return [];
+    
+    const files = fs.readdirSync(inputDir)
+        .filter(file => /\.(png|jpe?g)$/i.test(file))
+        .map(file => {
+            const fullPath = path.join(inputDir, file);
+            const stats = fs.statSync(fullPath);
+            return {
+                name: file,
+                path: fullPath,
+                mtime: stats.mtimeMs
+            };
+        })
+        .sort((a, b) => b.mtime - a.mtime); // Newest first
+        
+    return files;
+});
+
 ipcMain.handle('download-image', async (event, sourcePath) => {
     try {
         const { dialog } = require('electron');

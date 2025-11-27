@@ -19,6 +19,16 @@
   </div>
 
   <div class="app-container">
+    <!-- Input Library -->
+    <div class="library-column">
+        <div class="library-header">
+            <span class="icon">📂</span> INPUTS <span id="library-count-input" style="margin-left: auto; color: var(--text-secondary);">0</span>
+        </div>
+        <div id="library-list-input" class="library-list">
+            <!-- Thumbnails will be injected here -->
+        </div>
+    </div>
+
     <!-- Sidebar -->
     <div class="sidebar">
       
@@ -85,6 +95,11 @@
       <button id="generate-btn" class="primary-btn">
         <span class="icon">⚡</span> Generate Image
       </button>
+      
+      <!-- Request List -->
+      <div id="request-list" class="request-list-container">
+        <!-- Request items will be injected here -->
+      </div>
     </div>
 
     <!-- Main Content -->
@@ -94,8 +109,6 @@
         
         <div id="placeholder-state" class="placeholder-state">
           <div class="placeholder-icon">🖼️</div>
-          <h2>Ready to create</h2>
-          <p>Generated images will appear here</p>
         </div>
 
         <img id="result-image" class="result-image hidden" alt="Generated Image">
@@ -114,12 +127,12 @@
       </div>
     </div>
 
-    <!-- Library Sidebar -->
+    <!-- Output Library -->
     <div class="library-column">
         <div class="library-header">
-            <span class="icon">📂</span> LIBRARY <span id="library-count" style="margin-left: auto; color: var(--text-secondary);">0</span>
+            <span class="icon">📂</span> OUTPUTS <span id="library-count-output" style="margin-left: auto; color: var(--text-secondary);">0</span>
         </div>
-        <div id="library-list" class="library-list">
+        <div id="library-list-output" class="library-list">
             <!-- Thumbnails will be injected here -->
         </div>
     </div>

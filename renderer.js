@@ -10,7 +10,9 @@ let state = {
   resolution: '1K',
   aspectRatio: '1:1',
   prompt: '',
-  references: [] // { hash, mimeType, data (base64) }
+  references: [], // { hash, mimeType, data (base64) }
+  requests: [], // { id, status, prompt, resolution, ratio, references, timestamp, resultPath, error }
+  currentRequestId: null
 };
 
 let INPUT_DIR = null;
@@ -26,7 +28,8 @@ let INPUT_DIR = null;
         log(`Input directory ready: ${INPUT_DIR}`);
         
         // Initial library load
-        await loadLibrary();
+        await loadInputLibrary();
+        await loadOutputLibrary();
         
     } catch (e) {
         log(`Error initializing paths: ${e.message}`, 'error');
@@ -50,6 +53,7 @@ const els = {
   restoreDrop: document.getElementById('restore-drop-zone'),
   
   generateBtn: document.getElementById('generate-btn'),
+  requestList: document.getElementById('request-list'), // New
   
   previewArea: document.getElementById('image-preview-container'),
   placeholder: document.getElementById('placeholder-state'),
@@ -61,8 +65,12 @@ const els = {
   downloadBtn: document.getElementById('download-btn'),
   
   resetBtn: document.getElementById('reset-btn'),
-  libraryList: document.getElementById('library-list'),
-  libraryCount: document.getElementById('library-count'),
+  
+  libraryListInput: document.getElementById('library-list-input'),
+  libraryCountInput: document.getElementById('library-count-input'),
+  
+  libraryListOutput: document.getElementById('library-list-output'),
+  libraryCountOutput: document.getElementById('library-count-output'),
   
   logs: document.getElementById('logs-output')
 };
@@ -142,20 +150,128 @@ function removeRef(idx) {
   updateStateUI();
 }
 
+// --- Request List Rendering ---
+function renderRequestList() {
+    els.requestList.innerHTML = '';
+    
+    state.requests.forEach(req => {
+        const item = document.createElement('div');
+        item.className = `request-item ${state.currentRequestId === req.id ? 'active' : ''}`;
+        
+        // Icon based on status
+        const iconDiv = document.createElement('div');
+        iconDiv.className = 'request-status-icon';
+        
+        if (req.status === 'pending') {
+            const spinner = document.createElement('div');
+            spinner.className = 'spinner-small';
+            iconDiv.appendChild(spinner);
+        } else if (req.status === 'success') {
+            iconDiv.textContent = '✓';
+            iconDiv.classList.add('status-success');
+        } else {
+            iconDiv.textContent = '✕';
+            iconDiv.classList.add('status-error');
+        }
+        
+        // Info
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'request-info';
+        
+        const promptEl = document.createElement('div');
+        promptEl.className = 'request-prompt';
+        promptEl.textContent = req.prompt || '(No prompt)';
+        
+        const metaEl = document.createElement('div');
+        metaEl.className = 'request-meta';
+        metaEl.textContent = `${req.resolution} • ${req.ratio} • ${new Date(req.timestamp).toLocaleTimeString()}`;
+        
+        infoDiv.appendChild(promptEl);
+        infoDiv.appendChild(metaEl);
+        
+        item.appendChild(iconDiv);
+        item.appendChild(infoDiv);
+        
+        item.addEventListener('click', () => selectRequest(req.id));
+        
+        els.requestList.appendChild(item);
+    });
+}
+
+function selectRequest(id) {
+    const req = state.requests.find(r => r.id === id);
+    if (!req) return;
+    
+    state.currentRequestId = id;
+    renderRequestList(); // update active class
+    
+    // Restore Context
+    state.resolution = req.resolution;
+    state.aspectRatio = req.ratio;
+    state.prompt = req.prompt;
+    // Deep copy references to avoid mutation issues
+    state.references = JSON.parse(JSON.stringify(req.references));
+    
+    updateStateUI();
+    
+    // Update Main View
+    updateMainView(req);
+}
+
+function updateMainView(req) {
+    // Hide everything first
+    els.resultImage.classList.add('hidden');
+    els.placeholder.classList.add('hidden');
+    els.spinner.classList.add('hidden');
+    els.tag.classList.add('hidden');
+    els.downloadArea.classList.add('hidden');
+    els.resultImage.src = '';
+    
+    if (req.status === 'pending') {
+        els.spinner.classList.remove('hidden');
+        els.tag.textContent = `${req.resolution} • ${req.ratio}`;
+        els.tag.classList.remove('hidden');
+    } else if (req.status === 'success') {
+        els.resultImage.src = `file://${req.resultPath}`;
+        els.resultImage.classList.remove('hidden');
+        els.tag.textContent = `${req.resolution} • ${req.ratio}`;
+        els.tag.classList.remove('hidden');
+        els.downloadArea.classList.remove('hidden');
+    } else if (req.status === 'error') {
+        els.placeholder.classList.remove('hidden');
+        // Show error in placeholder?
+        const icon = els.placeholder.querySelector('.placeholder-icon');
+        if (icon) icon.textContent = '⚠️'; // warning icon
+        // We removed text from placeholder as per requirements, but maybe we should show error toast?
+        // Or just rely on logs.
+        // "in case of failed request show error info in box for generated images."
+        // Since we removed text, we should probably add a temporary error message element.
+        let errEl = els.placeholder.querySelector('.error-msg');
+        if (!errEl) {
+             errEl = document.createElement('p');
+             errEl.className = 'error-msg';
+             errEl.style.color = '#f44336';
+             errEl.style.marginTop = '10px';
+             els.placeholder.appendChild(errEl);
+        }
+        errEl.textContent = req.error || 'Generation failed';
+        els.placeholder.classList.remove('hidden');
+    }
+}
+
 // --- Library Management ---
-async function loadLibrary() {
+async function loadOutputLibrary() {
     try {
         const files = await ipcRenderer.invoke('list-output-files');
-        els.libraryList.innerHTML = '';
-        if (els.libraryCount) els.libraryCount.textContent = files.length;
+        els.libraryListOutput.innerHTML = '';
+        if (els.libraryCountOutput) els.libraryCountOutput.textContent = files.length;
         
-        // Start Bar
         const startBar = document.createElement('div');
         startBar.style.height = '2px';
         startBar.style.backgroundColor = 'white';
         startBar.style.marginBottom = '10px';
         startBar.style.flexShrink = '0'; 
-        els.libraryList.appendChild(startBar);
+        els.libraryListOutput.appendChild(startBar);
 
         files.forEach((file, idx) => {
             const div = document.createElement('div');
@@ -163,16 +279,14 @@ async function loadLibrary() {
             div.title = `Generated: ${new Date(file.mtime).toLocaleString()}`;
             
             const img = document.createElement('img');
-            img.src = `file://${file.path}`; // Load local file
+            img.src = `file://${file.path}`; 
             img.className = 'library-thumb';
             img.loading = 'lazy';
 
-            // Image Counter
             const counterSpan = document.createElement('span');
             counterSpan.className = 'library-item-counter';
-            counterSpan.textContent = idx + 1; // 1-based index
+            counterSpan.textContent = idx + 1;
             
-            // Top Zone: Reference
             const topZone = document.createElement('div');
             topZone.className = 'lib-overlay-top';
             topZone.textContent = 'Reference';
@@ -181,21 +295,25 @@ async function loadLibrary() {
                 await addLibraryImageToReference(file.path);
             });
             
-            // Bottom Zone: Context
             const bottomZone = document.createElement('div');
             bottomZone.className = 'lib-overlay-bottom';
             bottomZone.textContent = 'Context';
             bottomZone.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                // Load into main view
+                // Load into main view by simulating a request or just restoring
+                // We don't have a "request" object for library items unless we create one.
+                // But clicking context works as "restore context"
+                await restoreContext(file.path);
+                
+                // Also show the image
                 els.resultImage.src = img.src;
                 els.resultImage.classList.remove('hidden');
                 els.placeholder.classList.add('hidden');
-                currentImagePath = file.path;
                 els.downloadArea.classList.remove('hidden');
-                
-                // Restore context
-                await restoreContext(file.path);
+                // Update tag
+                // We can read meta or just use what we have
+                els.tag.textContent = `${state.resolution} • ${state.aspectRatio}`; // state updated by restoreContext
+                els.tag.classList.remove('hidden');
             });
 
             div.appendChild(img);
@@ -203,34 +321,92 @@ async function loadLibrary() {
             div.appendChild(topZone);
             div.appendChild(bottomZone);
             
-            els.libraryList.appendChild(div);
+            els.libraryListOutput.appendChild(div);
         });
 
-        // End Bar
         const endBar = document.createElement('div');
         endBar.style.height = '2px';
         endBar.style.backgroundColor = 'white';
-        endBar.style.marginTop = '0px'; // Margin handled by previous element's bottom margin
+        endBar.style.marginTop = '0px';
         endBar.style.flexShrink = '0';
-        els.libraryList.appendChild(endBar);
+        els.libraryListOutput.appendChild(endBar);
 
     } catch (e) {
-        log(`Error loading library: ${e.message}`, 'error');
+        log(`Error loading output library: ${e.message}`, 'error');
+    }
+}
+
+async function loadInputLibrary() {
+    try {
+        const files = await ipcRenderer.invoke('list-input-files');
+        els.libraryListInput.innerHTML = '';
+        if (els.libraryCountInput) els.libraryCountInput.textContent = files.length;
+        
+        const startBar = document.createElement('div');
+        startBar.style.height = '2px';
+        startBar.style.backgroundColor = 'white';
+        startBar.style.marginBottom = '10px';
+        startBar.style.flexShrink = '0'; 
+        els.libraryListInput.appendChild(startBar);
+
+        files.forEach((file, idx) => {
+            const div = document.createElement('div');
+            div.className = 'library-item';
+            div.title = `Input Image: ${file.name}`;
+            
+            const img = document.createElement('img');
+            img.src = `file://${file.path}`;
+            img.className = 'library-thumb';
+            img.loading = 'lazy';
+
+            const counterSpan = document.createElement('span');
+            counterSpan.className = 'library-item-counter';
+            counterSpan.textContent = idx + 1; 
+            
+            const overlay = document.createElement('div');
+            overlay.className = 'lib-overlay-single';
+            
+            overlay.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await addLibraryImageToReference(file.path);
+            });
+
+            div.appendChild(img);
+            div.appendChild(counterSpan);
+            div.appendChild(overlay);
+            
+            els.libraryListInput.appendChild(div);
+        });
+
+        const endBar = document.createElement('div');
+        endBar.style.height = '2px';
+        endBar.style.backgroundColor = 'white';
+        endBar.style.marginTop = '0px';
+        endBar.style.flexShrink = '0';
+        els.libraryListInput.appendChild(endBar);
+
+    } catch (e) {
+        log(`Error loading input library: ${e.message}`, 'error');
     }
 }
 
 async function addLibraryImageToReference(filePath) {
-    if (state.references.length >= 9) {
-        log('Reference limit reached (9).', 'warn');
-        return;
-    }
-    
     try {
         const buffer = fs.readFileSync(filePath);
         const hash = crypto.createHash('md5').update(buffer).digest('hex');
         
-        // Determine extension from file path or magic bytes? 
-        // filePath is known to be .png or .jpg from list-output-files
+        const existingIdx = state.references.findIndex(r => r.hash === hash);
+        if (existingIdx !== -1) {
+            removeRef(existingIdx);
+            log('Removed from references.', 'info');
+            return;
+        }
+
+        if (state.references.length >= 9) {
+            log('Reference limit reached (9).', 'warn');
+            return;
+        }
+
         let ext = path.extname(filePath).substring(1);
         
         const saveName = `${hash}.${ext}`;
@@ -241,14 +417,6 @@ async function addLibraryImageToReference(filePath) {
             log(`Saved to references: ${saveName}`);
         }
         
-        // Avoid dupes in state
-        if (state.references.some(r => r.hash === hash)) {
-            log('Image already in references.', 'warn');
-            return;
-        }
-
-        // Detect mime for state
-        // Simple inference based on ext since we trust our own output
         const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
 
         state.references.push({
@@ -265,45 +433,40 @@ async function addLibraryImageToReference(filePath) {
     }
 }
 
-// --- Init Sequence ---
-// Call after paths are ready
-const initApp = async () => {
-    await loadLibrary();
-};
-// Trigger init when input dir is ready
-// (Modified the top-level async IIFE to call this)
-
 // --- Interaction ---
 
-// Reset
 els.resetBtn.addEventListener('click', () => {
-    state = {
-        resolution: '1K',
-        aspectRatio: '1:1',
-        references: [],
-        prompt: ''
-    };
+    state.resolution = '1K';
+    state.aspectRatio = '1:1';
+    state.references = [];
+    state.prompt = '';
     
-    // Clear UI specific elements
+    // We do not clear the request list, just the context form
+    state.currentRequestId = null;
+    
     els.resultImage.src = '';
     els.resultImage.classList.add('hidden');
     els.placeholder.classList.remove('hidden');
     els.downloadArea.classList.add('hidden');
     els.tag.classList.add('hidden');
-    currentImagePath = null;
+    
+    // Clear error msg if any
+    const errEl = els.placeholder.querySelector('.error-msg');
+    if (errEl) errEl.remove();
+    const icon = els.placeholder.querySelector('.placeholder-icon');
+    if (icon) icon.textContent = '🖼️';
     
     updateStateUI();
+    renderRequestList(); // to remove active selection
     log('Context reset.');
 });
 
-// Helper to get path safely
 function getFilePath(file) {
     if (file.path) return file.path;
     if (webUtils && webUtils.getPathForFile) return webUtils.getPathForFile(file);
     return null;
 }
 
-// Button Groups
 els.resGroup.addEventListener('click', e => {
   if (e.target.tagName === 'BUTTON') {
     state.resolution = e.target.dataset.value;
@@ -318,7 +481,6 @@ els.ratioGroup.addEventListener('click', e => {
   }
 });
 
-// Prompt
 els.prompt.addEventListener('input', () => {
   state.prompt = els.prompt.value;
   els.charCounter.textContent = els.prompt.value.length;
@@ -357,14 +519,9 @@ async function handleRefFiles(files) {
 
     try {
       const buffer = fs.readFileSync(filePath);
-      
-      // Calculate MD5
       const hash = crypto.createHash('md5').update(buffer).digest('hex');
-      
-      // Determine extension
-      // Use original extension if possible, or infer from mime
       let ext = path.extname(file.name).substring(1); 
-      if (!ext) ext = 'png'; // fallback
+      if (!ext) ext = 'png'; 
       
       const saveName = `${hash}.${ext}`;
       const savePath = path.join(INPUT_DIR, saveName);
@@ -372,12 +529,8 @@ async function handleRefFiles(files) {
       if (!fs.existsSync(savePath)) {
           fs.writeFileSync(savePath, buffer);
           log(`Saved: ${saveName}`);
-      } else {
-          log(`Exists: ${saveName}`);
       }
       
-      // Check if already in list to avoid visual duplicates? 
-      // Requirement doesn't specify, but good UX.
       if (state.references.some(r => r.hash === hash)) {
           log(`Image already added to references.`);
           continue;
@@ -395,9 +548,9 @@ async function handleRefFiles(files) {
     }
   }
   updateStateUI();
+  await loadInputLibrary();
 }
 
-// Restore Context Drag & Drop
 els.restoreDrop.addEventListener('dragover', e => {
   e.preventDefault();
   els.restoreDrop.classList.add('drag-over');
@@ -420,13 +573,11 @@ async function restoreContext(filePath) {
     const buffer = fs.readFileSync(filePath);
     let metadataStr = null;
 
-    // Try PNG tEXt
     if (filePath.toLowerCase().endsWith('.png')) {
         const pngMeta = readPngMetadata(buffer);
         if (pngMeta) metadataStr = pngMeta;
     }
     
-    // Try JPEG UserComment
     if (!metadataStr && (filePath.toLowerCase().match(/\.jpe?g$/))) {
          const jpgData = buffer.toString('binary');
          const exifObj = piexif.load(jpgData);
@@ -444,16 +595,14 @@ async function restoreContext(filePath) {
       
       state.resolution = data.resolution || '1K';
       state.aspectRatio = data.ratio || '1:1';
-      els.prompt.value = data.prompt || '';
+      state.prompt = data.prompt || '';
+      els.prompt.value = state.prompt;
       
-      // Restore References
       state.references = [];
       if (data.referenceImages && Array.isArray(data.referenceImages)) {
-          // data.referenceImages is [{hash, mimeType}]
           const files = fs.readdirSync(INPUT_DIR);
           
           for (const ref of data.referenceImages) {
-              // Find file starting with hash
               const match = files.find(f => f.startsWith(ref.hash));
               if (match) {
                   const refPath = path.join(INPUT_DIR, match);
@@ -508,64 +657,94 @@ function readPngMetadata(buffer) {
     return null;
 }
 
-// Generate
-let currentImagePath = null;
-
-els.generateBtn.addEventListener('click', async () => {
+// --- Generate Logic (Parallel) ---
+els.generateBtn.addEventListener('click', () => {
   const prompt = els.prompt.value.trim();
   if (!prompt) {
     log('Please enter a prompt.', 'error');
     return;
   }
 
-  els.generateBtn.disabled = true;
-  els.spinner.classList.remove('hidden');
-  els.resultImage.classList.add('hidden');
-  els.placeholder.classList.add('hidden');
-  els.downloadArea.classList.add('hidden'); // Hide download while regenerating
-  
-  log(`Generating... [${state.resolution}, ${state.aspectRatio}]`);
-
-  const requestData = {
-    prompt,
-    resolution: state.resolution,
-    ratio: state.aspectRatio,
-    // Send only hash and mimeType
-    referenceImages: state.references.map(r => ({ hash: r.hash, mimeType: r.mimeType }))
+  // Create Request Object
+  const reqId = Date.now();
+  const reqObj = {
+      id: reqId,
+      status: 'pending',
+      prompt: state.prompt,
+      resolution: state.resolution,
+      ratio: state.aspectRatio,
+      // Deep copy refs
+      references: JSON.parse(JSON.stringify(state.references)),
+      timestamp: new Date(),
+      resultPath: null,
+      error: null
   };
 
-  try {
-    const result = await ipcRenderer.invoke('generate-image', requestData);
-    
-    if (result.success) {
-      log(`Image generated: ${result.path}`, 'success');
-      els.resultImage.src = `file://${result.path}`;
-      els.resultImage.classList.remove('hidden');
-      els.tag.textContent = `${state.resolution} • ${state.aspectRatio}`;
-      els.tag.classList.remove('hidden');
-      
-      currentImagePath = result.path;
-      els.downloadArea.classList.remove('hidden');
-      
-      // Refresh Library
-      await loadLibrary();
-      
-    } else {
-      log(`Error: ${result.error}`, 'error');
-      els.placeholder.classList.remove('hidden');
-    }
-  } catch (err) {
-    log(`IPC Error: ${err.message}`, 'error');
-    els.placeholder.classList.remove('hidden');
-  } finally {
-    els.generateBtn.disabled = false;
-    els.spinner.classList.add('hidden');
-  }
+  // Add to start of list
+  state.requests.unshift(reqObj);
+  
+  // Select it
+  state.currentRequestId = reqId;
+  
+  renderRequestList();
+  updateMainView(reqObj);
+  
+  log(`Queued request: ${reqId}`);
+
+  const requestData = {
+    prompt: reqObj.prompt,
+    resolution: reqObj.resolution,
+    ratio: reqObj.ratio,
+    referenceImages: reqObj.references.map(r => ({ hash: r.hash, mimeType: r.mimeType }))
+  };
+
+  // Call IPC without await blocking the function
+  ipcRenderer.invoke('generate-image', requestData)
+    .then(result => {
+        const r = state.requests.find(x => x.id === reqId);
+        if (!r) return; // Should not happen
+
+        if (result.success) {
+            r.status = 'success';
+            r.resultPath = result.path;
+            log(`Request ${reqId} completed.`, 'success');
+            loadOutputLibrary(); // Refresh library
+        } else {
+            r.status = 'error';
+            r.error = result.error;
+            log(`Request ${reqId} failed: ${result.error}`, 'error');
+        }
+        
+        renderRequestList();
+        // Update main view if this request is still selected
+        if (state.currentRequestId === reqId) {
+            updateMainView(r);
+        }
+    })
+    .catch(err => {
+        const r = state.requests.find(x => x.id === reqId);
+        if (!r) return;
+        
+        r.status = 'error';
+        r.error = err.message;
+        log(`Request ${reqId} crashed: ${err.message}`, 'error');
+        
+        renderRequestList();
+        if (state.currentRequestId === reqId) {
+            updateMainView(r);
+        }
+    });
 });
 
 els.downloadBtn.addEventListener('click', async () => {
-    if (!currentImagePath) return;
-    const res = await ipcRenderer.invoke('download-image', currentImagePath);
+    // Find current request path or just use result-image src?
+    // We should use the current request's result path if available
+    const req = state.requests.find(r => r.id === state.currentRequestId);
+    const path = req ? req.resultPath : null;
+    
+    if (!path) return;
+    
+    const res = await ipcRenderer.invoke('download-image', path);
     if (res.success) {
         log(`Saved copy to: ${res.path}`, 'success');
     } else if (res.error) {
