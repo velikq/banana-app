@@ -63,7 +63,7 @@ function injectPngMetadata(buffer, key, value) {
   // Insert before IEND (last 12 bytes usually, but let's just find IEND)
   // IEND is 00 00 00 00 49 45 4E 44 AE 42 60 82
   const iendHeader = Buffer.from([0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44]);
-  const iendIdx = buffer.indexOf(iendHeader);
+  const iendIdx = buffer.lastIndexOf(iendHeader);
   
   if (iendIdx === -1) return buffer; // broken png?
   
@@ -125,7 +125,10 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
       throw new Error('API Key is missing in .env file');
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ 
+      apiKey,
+      httpOptions: { timeout: 600000 } // 10 minutes timeout for large image generation
+    });
     const model = 'gemini-3-pro-image-preview';
     
     // Config
@@ -247,13 +250,10 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
     const savePath = path.join(__dirname, 'output');
     console.log(`Saving to: ${savePath}`);
     
-    if (!fs.existsSync(savePath)) {
-        console.log('Creating directory...');
-        fs.mkdirSync(savePath, { recursive: true });
-    }
+    await fs.promises.mkdir(savePath, { recursive: true });
     
     const fullPath = path.join(savePath, fileName);
-    fs.writeFileSync(fullPath, savedBuffer);
+    await fs.promises.writeFile(fullPath, savedBuffer);
     console.log(`File written: ${fullPath}`);
 
     return { success: true, path: fullPath };
@@ -322,7 +322,7 @@ ipcMain.handle('download-image', async (event, sourcePath) => {
         });
 
         if (filePath) {
-            fs.copyFileSync(sourcePath, filePath);
+            await fs.promises.copyFile(sourcePath, filePath);
             return { success: true, path: filePath };
         }
         return { success: false, canceled: true };

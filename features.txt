@@ -1,0 +1,41 @@
+implement all "todo: " found. then remove "todo: " prefix.
+title of app: banana.pots (in italic) pro-vip-delux edition ("vip" in bold)
+
+complete:
+App is using google's nano banana pro (gemini-3-pro-image-preview) API. example of API call is presented in "google api snippet.ts"
+UI of the app is shown in "UI reference.png" file.
+the main feature is to have all generation info (used reference files names, prompt, resolution and aspect ratio) saved into metadata of generated image. later that image could be loaded to load (all used data for it generation) in form fields.
+reference images box works with drag-and-drop.
+restore context box wors with drag-and-drop.
+api key is saved in .env file. you should create env file with empty api key variable
+all uploaded images in "reference images" should be saved into /input folder with md5 hash in their name. check if they are already saved and do not overwrite existing image.
+hashes of userd reference images are saved in generated image metadata
+when user restores context then app should load "reference images" from /input folder
+generated images with injected metadata should be saved in /output with a timestamp in name
+after generation should be shown a download button between image and logs
+while hovering over reference image, this image should get lightly shadowed with X mark in center
+reference images should drop inside "add box" and "add" text should disappear. if all images are removed this text comes back
+input and output folders for images should be relative to app and not hardcoded
+library of generated images on right part of the window. library is vertical list of tiny images that are lying in /output. library is vertically scrollable with mouse wheel
+click on image of library loads generation context of that image and puts image into generated image box
+library is updated when new images are generated
+above "generated image box" a button to reset all generation context on window form
+when hovering on image in library image is slightly shadowed. shadow is split into 2 zones: top and bottom. when howering a zone it becomes darker and shows text (only while hover). top zone text "reference" and clicking it puts this image into reference images box and saves it to /input folder with mb5 hash name. bottom zone has text "context" and works as current on-click function of restoring context from this image.
+Images in library are resized keeping their aspect ratio
+remove stock menubar. replace it with same style bar as app: left part - app title, right part - minimize, window size and close buttons
+image library needs vertical scroll. scroll bar is hidden. library title has a counter of images it contains. counter updates when generated image is saved to library
+images in library should have fixed height and not shrink when there is a lot of images.
+library keeps trying to fit all images at once. there should be shown only fitting amount of images and others should be accessible through scrolling
+remove flex-box capabilities from #library-list element
+add a 2 white bars at start and end of images in library indicating that user scrolled through until end/start.
+add a counter for each image in library in top right corner of image
+a copy of library to left part of the screen. it should show images from /input folder
+left library has title "Inputs". right library has title "Outputs"
+images on left library has no zones of shadows, just plain shadow without text. clicking on it will add this image to reference box
+clicking on any image in libraries to add it to references while it is there already should instead remove it from reference box
+remove all text from box for viewing generated image
+option to send multiple requests at the same time. under "generate button" show a live list of requests: pending, executed, failed; ordered by new from above. add icon for each type. list is scrollable without scroll menu. when request is completed save generated image with metadata in the background task. clicking on request should restore its context and show generated picture if it was succeded, in case of pending show loading ring animation on box of generated image. in case of failed request show error info in box for generated images.
+
+new:
+todo: remove undo prompt augment with aspect ratio. ratio is send in separate field because model supports it.
+todo: remove "download image" button completely.
