@@ -135,7 +135,8 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
     const config = {
       responseModalities: ['IMAGE'], // We only want image
       imageConfig: {
-        imageSize: resolution // '1K', '2K' etc
+        imageSize: resolution, // '1K', '2K' etc
+        aspectRatio: ratio
       }
     };
 
@@ -143,10 +144,7 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
     const parts = [];
     
     // Add text prompt
-    // We include aspect ratio in the prompt as instruction since config might not support it explicitly yet
-    // or it's safe to reinforce.
-    const augmentedPrompt = `${prompt} --aspect-ratio ${ratio}`; 
-    parts.push({ text: augmentedPrompt });
+    parts.push({ text: prompt });
 
     // Add reference images
     // Paths are now relative to the application root
@@ -172,7 +170,10 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
         }
     }
 
-    const contents = [{ role: 'user', parts }];
+    const contents = parts;
+
+    // Send contents to renderer console for debugging
+    event.sender.send('debug-log', 'Contents being sent to Gemini:', JSON.stringify(contents, null, 2));
 
     console.log('Sending request to Gemini...');
     // Send Request
@@ -311,22 +312,4 @@ ipcMain.handle('list-input-files', () => {
         .sort((a, b) => b.mtime - a.mtime); // Newest first
         
     return files;
-});
-
-ipcMain.handle('download-image', async (event, sourcePath) => {
-    try {
-        const { dialog } = require('electron');
-        const { filePath } = await dialog.showSaveDialog({
-            defaultPath: path.basename(sourcePath),
-            filters: [{ name: 'Images', extensions: ['png', 'jpg'] }]
-        });
-
-        if (filePath) {
-            await fs.promises.copyFile(sourcePath, filePath);
-            return { success: true, path: filePath };
-        }
-        return { success: false, canceled: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
 });

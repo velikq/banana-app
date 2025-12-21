@@ -36,6 +36,11 @@ let INPUT_DIR = null;
     }
 })();
 
+// Listen for debug logs from main process
+ipcRenderer.on('debug-log', (event, ...args) => {
+    console.log('[Main Process]:', ...args);
+});
+
 // --- DOM Elements ---
 const els = {
   refDrop: document.getElementById('ref-drop-zone'),
@@ -61,10 +66,8 @@ const els = {
   spinner: document.getElementById('loading-spinner'),
   tag: document.getElementById('preview-tag'),
   
-  downloadArea: document.getElementById('download-area'),
-  downloadBtn: document.getElementById('download-btn'),
-  
   resetBtn: document.getElementById('reset-btn'),
+
   
   libraryListInput: document.getElementById('library-list-input'),
   libraryCountInput: document.getElementById('library-count-input'),
@@ -224,7 +227,6 @@ function updateMainView(req) {
     els.placeholder.classList.add('hidden');
     els.spinner.classList.add('hidden');
     els.tag.classList.add('hidden');
-    els.downloadArea.classList.add('hidden');
     els.resultImage.src = '';
     
     if (req.status === 'pending') {
@@ -236,7 +238,6 @@ function updateMainView(req) {
         els.resultImage.classList.remove('hidden');
         els.tag.textContent = `${req.resolution} • ${req.ratio}`;
         els.tag.classList.remove('hidden');
-        els.downloadArea.classList.remove('hidden');
     } else if (req.status === 'error') {
         els.placeholder.classList.remove('hidden');
         // Show error in placeholder?
@@ -309,7 +310,6 @@ async function loadOutputLibrary() {
                 els.resultImage.src = img.src;
                 els.resultImage.classList.remove('hidden');
                 els.placeholder.classList.add('hidden');
-                els.downloadArea.classList.remove('hidden');
                 // Update tag
                 // We can read meta or just use what we have
                 els.tag.textContent = `${state.resolution} • ${state.aspectRatio}`; // state updated by restoreContext
@@ -447,7 +447,6 @@ els.resetBtn.addEventListener('click', () => {
     els.resultImage.src = '';
     els.resultImage.classList.add('hidden');
     els.placeholder.classList.remove('hidden');
-    els.downloadArea.classList.add('hidden');
     els.tag.classList.add('hidden');
     
     // Clear error msg if any
@@ -734,24 +733,6 @@ els.generateBtn.addEventListener('click', () => {
             updateMainView(r);
         }
     });
-});
-
-els.downloadBtn.addEventListener('click', async () => {
-    // Find current request path or just use result-image src?
-    // We should use the current request's result path if available
-    const req = state.requests.find(r => r.id === state.currentRequestId);
-    const path = req ? req.resultPath : null;
-    
-    if (!path) return;
-    
-    const res = await ipcRenderer.invoke('download-image', path);
-    if (res.success) {
-        log(`Saved copy to: ${res.path}`, 'success');
-    } else if (res.error) {
-        log(`Save failed: ${res.error}`, 'error');
-    } else if (res.canceled) {
-        log('Save canceled.');
-    }
 });
 
 // --- Title Bar Controls ---

@@ -39,7 +39,7 @@ body {
 
 .title-vip {
     font-weight: bold;
-    color: var(--accent-color); /* Or keep white/text-primary */
+    color: var(--accent-color);
 }
 
 .title-bar-controls {
@@ -303,12 +303,6 @@ textarea:focus {
 .secondary-btn:hover {
   background-color: #333;
   border-color: var(--accent-color);
-}
-
-.download-area {
-  margin-top: 10px;
-  display: flex;
-  justify-content: center;
 }
 
 /* Main Content */
