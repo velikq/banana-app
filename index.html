@@ -12,13 +12,77 @@
       <i>banana.pots</i> pro-<span class="title-vip">vip</span>-delux edition
     </div>
     <div class="title-bar-controls">
+      <button id="btn-settings" class="control-btn">⚙</button>
       <button id="btn-minimize" class="control-btn">─</button>
       <button id="btn-maximize" class="control-btn">☐</button>
       <button id="btn-close" class="control-btn close-btn">✕</button>
     </div>
   </div>
 
+  <!-- Settings Overlay -->
+  <div id="settings-overlay" class="overlay hidden">
+    <div class="overlay-content">
+      <div class="overlay-header">
+        <h3>Settings</h3>
+        <button id="btn-close-settings" class="close-overlay-btn">✕</button>
+      </div>
+      <div class="overlay-body">
+        <div class="setting-item">
+          <label for="api-key-input">New Gemini API Key:</label>
+          <input type="password" id="api-key-input" placeholder="Enter new API key (leave empty to keep current)">
+        </div>
+        <div class="setting-item checkbox-item">
+          <input type="checkbox" id="debug-mode-checkbox">
+          <label for="debug-mode-checkbox">Debug Mode</label>
+        </div>
+        <button id="btn-save-settings" class="primary-btn">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Project Overlay -->
+  <div id="project-overlay" class="overlay hidden">
+    <div class="overlay-content">
+      <div class="overlay-header">
+        <h3>New Project</h3>
+        <button id="btn-close-project" class="close-overlay-btn">✕</button>
+      </div>
+      <div class="overlay-body">
+        <div class="setting-item">
+          <label for="project-title-input">Project Title:</label>
+          <input type="text" id="project-title-input" placeholder="Enter project title">
+        </div>
+        
+        <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 8px;">Select Preview Image:</label>
+        <div class="project-creation-area">
+            <div class="project-preview-selected">
+                <img id="project-new-preview-img" class="hidden">
+                <div id="project-new-preview-placeholder" class="placeholder-text">Select from right →</div>
+            </div>
+            <div class="project-image-selector">
+                 <div id="project-image-grid" class="image-grid-3x9">
+                     <!-- Images injected here -->
+                 </div>
+            </div>
+        </div>
+
+        <button id="btn-save-project" class="primary-btn" style="margin-top: 20px;">Create Project</button>
+      </div>
+    </div>
+  </div>
+
   <div class="app-container">
+    <!-- Projects Library -->
+    <div class="library-column">
+        <div class="library-header">
+            <span class="icon">📂</span> PROJECTS
+            <button id="btn-add-project" class="add-btn" title="New Project">+</button>
+        </div>
+        <div id="library-list-projects" class="library-list">
+            <!-- Projects will be injected here -->
+        </div>
+    </div>
+
     <!-- Input Library -->
     <div class="library-column">
         <div class="library-header">
@@ -119,6 +183,18 @@
         <div class="logs-header">>_ REQUEST LOGS</div>
         <div id="logs-output" class="logs-output">Waiting for requests...</div>
       </div>
+
+      <!-- Conveyor Area -->
+      <div class="conveyor-area">
+          <div id="conveyor-status-box" class="conveyor-status-box hidden">
+              <div class="conveyor-info">
+                  <div id="conveyor-prompt-preview" class="conveyor-prompt-preview">Processing...</div>
+                  <div id="conveyor-counter" class="conveyor-counter">0/0</div>
+              </div>
+              <button id="btn-stop-conveyor" class="close-btn-small">✕</button>
+          </div>
+          <button id="btn-add-conveyor" class="add-conveyor-btn">+</button>
+      </div>
     </div>
 
     <!-- Output Library -->
@@ -131,6 +207,77 @@
         </div>
     </div>
 
+  </div>
+
+  <!-- Conveyor Creation Overlay -->
+  <div id="conveyor-overlay" class="overlay hidden">
+    <div class="overlay-content large-overlay">
+      <div class="overlay-header">
+        <h3>Conveyor Generation</h3>
+        <button id="btn-close-conveyor" class="close-overlay-btn">✕</button>
+      </div>
+      <div class="overlay-body conveyor-body">
+        
+        <!-- Left: Library -->
+        <div class="conveyor-library-section">
+            <div class="section-label">Library (Inputs & Outputs)</div>
+            <div id="conveyor-library-grid" class="conveyor-library-grid">
+                <!-- Items injected here -->
+            </div>
+        </div>
+
+        <!-- Right: Controls -->
+        <div class="conveyor-controls-section">
+            <div class="control-group">
+                <label>General Prompt</label>
+                <textarea id="conveyor-prompt-input" placeholder="Enter general prompt..."></textarea>
+            </div>
+            
+            <div class="control-group">
+                <label>General References <span id="conveyor-gen-ref-count">(0)</span></label>
+                <div id="conveyor-gen-ref-list" class="mini-ref-list"></div>
+            </div>
+
+            <div class="control-group">
+                <label>Conveyor Images <span id="conveyor-img-count">(0)</span></label>
+                <div id="conveyor-img-list" class="mini-ref-list"></div>
+            </div>
+
+            <button id="btn-execute-conveyor" class="primary-btn">Execute</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Conveyor Details Overlay (Overlay #1) -->
+  <div id="conveyor-details-overlay" class="conveyor-details-overlay hidden">
+      <div class="details-header">Conveyor Details</div>
+      <div class="details-section">
+          <div class="label">Prompt:</div>
+          <div id="details-prompt" class="details-text"></div>
+      </div>
+      <div class="details-section">
+          <div class="label">General Refs:</div>
+          <div id="details-gen-refs" class="details-thumbs"></div>
+      </div>
+      <div class="details-section">
+          <div class="label">Conveyor List:</div>
+          <div id="details-conv-list" class="details-thumbs"></div>
+      </div>
+  </div>
+
+  <!-- Conveyor Queue Overlay (Overlay #2) -->
+  <div id="conveyor-queue-overlay" class="conveyor-queue-overlay hidden">
+      <div class="queue-header">Queue</div>
+      <div id="conveyor-queue-list" class="queue-list">
+          <!-- Queue items injected here -->
+      </div>
+  </div>
+
+  <!-- Hover Preview -->
+  <div id="hover-preview" class="hover-preview hidden">
+    <img id="hover-preview-img" src="" alt="Preview">
   </div>
 
   <script src="renderer.js"></script>

@@ -36,3 +36,44 @@ option to send multiple requests at the same time. under "generate button" show 
 remove undo prompt augment with aspect ratio. ratio is send in separate field because model supports it.
 remove "download image" button completely.
 check "google api snippet.ts" for how contents object is formed and update code to match its structure
+in case of "No image data received from API" error look for text output in response chunks and log them to console
+add gear icon button to top menu to left of hide/minimize/close panel buttons. on click open overlay windows with settings (1. text input for new API key (empty field). 2. checkbox "debug mode". 3. save button.). include X button in top right of overlay to close overlay without saving (no confirm prompt).
+when saving settings check for new API key. if present update .env file. "debug mode" checkbox should be saved and shows as it configured now.
+disable all logging to dev console and terminal window if debug not is not enabled. (does not affect "request logs" window)
+when hovering over any image in input folder, output folder or reference images show an overlay next to it with this image in larger size. keep its aspect ratio
+when hovering over images appearing overlay should be sticking to its small image, not a users mouse.
+when hovering over image there is container for overlay image. this container is square shaped and images with aspect ratio different from 1:1 are "getting out"
+
+Projects Library:
+1. on UI to the left of "inputs" library add new library "Projects"
+2. to the right of title add "+" button
+3. after clicking "+" button an overlay window appears with form:
+3.1. input field "title"
+3.2. empty image with same size of input/output of images in existing libraries
+3.3. 3x9 scrollable image select with all images from input library. selecting image will change empty image from 3.2 to selected one
+3.4. save button. it saves info about title and selected preview image for library. all projects (for now is just title and used image name) info and used image itself is saved into projects.json in /projects folder. creates a folders with its title in /input and /output folders
+4. projects library shows its preview image with its title on top of image in center
+5. clicking on project in library switches content of input/output libraries:
+5.1. input images are now shown from /input/*project_name*. all new inputs are saved in /input/*project_name*/
+5.2. output images are now shown from /output/*project_name*. all new generations are saved in /output/*project_name*/
+
+add delete function for inputs and outputs. trigger that function when user clicks red X button in top right corner of input or output image
+remove confirmation dialog from delete function
+
+new feature - conveyor generation:
+0. generates image one by one (awaits previous generation before executing new one). it has general prompt with reference images and a list of images. this function iterates on images in list - adds them to list of general reference images and generates new image.
+0.1. only one conveyor can be run at time, but multiple of them can be queued.
+0.2. conveyor does not interact with basic UI elements on screen, it works under the hood.
+0.3. conveyor does not prevent basic generation method.
+1. add a new box under request logs UI element. it shows cropped prompt (if needed), live counter of generated and total images in conveyor (5/12) and X button to stop and delete conveyor.
+2. hovering over conveyor box shows:
+2.1 an overlay window (#1, to the right) with: 1. full general prompt, 2. previews of used general reference images, 3. list of conveyor preview images.
+2.2. another overlay window (#2, above) shows queue of next conveyors showing same type of conveyor preview (cropped prompt and live counter), hovering over queued conveyor shows overlay #1 with info about currently hovered conveyor.
+3. to the right of conveyor preview box there is + button that will open new overlay window "Conveyor generation"
+3.1. horizontal library of input and output images together with image previews of current project.
+3.1.1. images in library has 2 click zones: "general" and "conveyor".
+3.2. input textarea for general prompt
+3.3. box with previews of general reference images
+3.4. box with previews of conveyor images
+3.5. "Execute" button. it will close overlay and add new conveyor to queue if any conveyor is running or will start executing it now
+4. generated images should be saved in same way as old method - in output folder of project with injected metadata (promp and list of reference images (simplified used general and conveyor images))

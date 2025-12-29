@@ -330,6 +330,23 @@ textarea:focus {
     color: var(--text-primary);
     border-bottom: 1px solid var(--border-color);
     text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.add-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 5px;
+    transition: color 0.2s;
+}
+
+.add-btn:hover {
+    color: var(--accent-color);
 }
 
 .library-list {
@@ -357,18 +374,142 @@ textarea:focus {
     overflow: hidden;
     position: relative;
     border: 2px solid transparent;
+    cursor: pointer; /* Projects are clickable */
 }
+
+.library-item.active-project {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 10px rgba(241, 196, 15, 0.3);
+}
+
+.project-title-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    text-align: center;
+    max-width: 90%;
+    word-wrap: break-word;
+    pointer-events: none;
+}
+
+/* Project Creation Overlay */
+.project-creation-area {
+    display: flex;
+    gap: 20px;
+    height: 300px;
+}
+
+.project-preview-selected {
+    width: 150px;
+    height: 150px;
+    background-color: #000;
+    border: 1px dashed var(--border-color);
+    border-radius: 6px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.project-preview-selected img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.placeholder-text {
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-align: center;
+    padding: 10px;
+}
+
+.project-image-selector {
+    flex: 1;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+.image-grid-3x9 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.grid-item {
+    aspect-ratio: 1;
+    background-color: #000;
+    border-radius: 4px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid transparent;
+}
+
+.grid-item:hover {
+    border-color: var(--accent-color);
+}
+
+.grid-item.selected {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px var(--accent-color);
+}
+
+.grid-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
 
 .library-item-counter {
     position: absolute;
     top: 5px;
-    right: 5px;
+    left: 5px;
     background-color: rgba(0, 0, 0, 0.6);
     color: white;
     font-size: 10px;
     padding: 2px 5px;
     border-radius: 3px;
     z-index: 10; /* Ensure it's above other overlays */
+}
+
+.library-delete-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 20px;
+    height: 20px;
+    background-color: rgba(244, 67, 54, 0.8);
+    color: white;
+    border-radius: 3px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 20;
+    opacity: 0;
+    transition: opacity 0.2s, background-color 0.2s;
+}
+
+.library-item:hover .library-delete-btn {
+    opacity: 1;
+}
+
+.library-delete-btn:hover {
+    background-color: rgb(244, 67, 54);
 }
 
 .library-item:hover {
@@ -604,6 +745,128 @@ textarea:focus {
     margin-top: 2px;
 }
 
+/* Settings Overlay */
+.overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.overlay-content {
+    background-color: var(--bg-panel);
+    width: 400px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.overlay-header {
+    padding: 15px 20px;
+    background-color: #252525;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.overlay-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+.close-overlay-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 18px;
+    transition: color 0.2s;
+}
+
+.close-overlay-btn:hover {
+    color: white;
+}
+
+.overlay-body {
+    padding: 20px;
+}
+
+.setting-item {
+    margin-bottom: 20px;
+}
+
+.setting-item label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.setting-item input[type="password"],
+.setting-item input[type="text"] {
+    width: 100%;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    padding: 10px;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+
+.setting-item input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.checkbox-item input[type="checkbox"] {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+}
+
+.checkbox-item label {
+    margin-bottom: 0;
+    cursor: pointer;
+}
+
+/* Hover Preview */
+.hover-preview {
+    position: fixed;
+    z-index: 2000;
+    pointer-events: none; /* Don't interfere with mouse events */
+    background-color: var(--bg-panel);
+    border: 1px solid var(--accent-color);
+    border-radius: 8px;
+    padding: 5px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+    max-width: 400px;
+    max-height: 400px;
+}
+
+.hover-preview img {
+    max-width: 400px;
+    max-height: 400px;
+    border-radius: 4px;
+    display: block;
+    object-fit: contain;
+}
+
 /* Status Colors */
 .status-pending { color: var(--text-secondary); }
 .status-success { color: #4caf50; }
@@ -619,3 +882,249 @@ textarea:focus {
     animation: spin 1s linear infinite;
     display: block;
 }
+
+/* --- Conveyor Styles --- */
+
+.conveyor-area {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+    height: 50px;
+}
+
+.conveyor-status-box {
+    flex: 1;
+    background-color: #2a2a2a;
+    border: 1px solid var(--accent-color);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    position: relative;
+    cursor: default;
+}
+
+.conveyor-info {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.conveyor-prompt-preview {
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.conveyor-counter {
+    font-size: 10px;
+    color: var(--accent-color);
+    font-weight: bold;
+}
+
+.close-btn-small {
+    background: transparent;
+    border: none;
+    color: #f44336;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 5px;
+}
+
+.close-btn-small:hover { color: white; background: #f44336; border-radius: 50%; }
+
+.add-conveyor-btn {
+    width: 50px;
+    background-color: #2a2a2a;
+    border: 1px dashed var(--text-secondary);
+    color: var(--text-secondary);
+    font-size: 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.add-conveyor-btn:hover {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+/* Conveyor Overlay (Creation) */
+.large-overlay {
+    width: 900px;
+    height: 600px;
+    display: flex;
+    flex-direction: column;
+}
+
+.conveyor-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    padding: 0;
+}
+
+.conveyor-library-section {
+    width: 60%;
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    background-color: #1a1a1a;
+}
+
+.conveyor-controls-section {
+    width: 40%;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    overflow-y: auto;
+}
+
+.section-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+    font-weight: bold;
+}
+
+.conveyor-library-grid {
+    flex: 1;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 8px;
+    padding-right: 5px;
+}
+
+.conveyor-lib-item {
+    aspect-ratio: 1;
+    position: relative;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    overflow: hidden;
+    background: #000;
+}
+
+.conveyor-lib-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+}
+
+/* Click Zones */
+.zone-general, .zone-conveyor {
+    position: absolute;
+    width: 50%;
+    height: 100%;
+    top: 0;
+    opacity: 0;
+    transition: opacity 0.2s;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 10px;
+    font-weight: bold;
+    color: white;
+    text-transform: uppercase;
+    writing-mode: vertical-lr;
+    text-orientation: mixed;
+}
+
+.zone-general {
+    left: 0;
+    background-color: rgba(241, 196, 15, 0.6); /* Yellowish */
+}
+.zone-conveyor {
+    right: 0;
+    background-color: rgba(52, 152, 219, 0.6); /* Blueish */
+}
+
+.conveyor-lib-item:hover .zone-general,
+.conveyor-lib-item:hover .zone-conveyor {
+    opacity: 0.3;
+}
+
+.zone-general:hover { opacity: 0.9 !important; }
+.zone-conveyor:hover { opacity: 0.9 !important; }
+
+/* Mini Ref Lists */
+.mini-ref-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    min-height: 40px;
+    border: 1px dashed var(--border-color);
+    padding: 5px;
+    border-radius: 4px;
+    background: #222;
+}
+
+.mini-ref-thumb {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border-radius: 2px;
+    cursor: pointer;
+    border: 1px solid #444;
+}
+.mini-ref-thumb:hover { border-color: var(--accent-color); }
+
+/* Details & Queue Overlays */
+.conveyor-details-overlay {
+    position: fixed;
+    right: 360px; /* To the left of main content or positioned absolutely relative to box */
+    top: 50%;
+    transform: translateY(-50%);
+    width: 250px;
+    background: var(--bg-panel);
+    border: 1px solid var(--accent-color);
+    border-radius: 6px;
+    padding: 10px;
+    z-index: 200;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+    pointer-events: none; /* Let clicks pass through usually, unless we want interaction? Prompt says "hovering over... shows" */
+}
+
+.conveyor-queue-overlay {
+    position: fixed;
+    width: 250px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    z-index: 200;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+}
+
+.details-header, .queue-header {
+    font-size: 12px;
+    font-weight: bold;
+    color: var(--accent-color);
+    border-bottom: 1px solid #333;
+    padding-bottom: 5px;
+    margin-bottom: 5px;
+}
+
+.details-section { margin-bottom: 8px; }
+.details-section .label { font-size: 10px; color: var(--text-secondary); margin-bottom: 2px; }
+.details-text { font-size: 11px; color: #fff; max-height: 60px; overflow: hidden; }
+.details-thumbs { display: flex; gap: 2px; flex-wrap: wrap; }
+.details-thumbs img { width: 30px; height: 30px; object-fit: cover; }
+
+.queue-list { display: flex; flex-direction: column; gap: 5px; }
+.queue-item {
+    background: #2a2a2a;
+    padding: 5px;
+    border-radius: 4px;
+    font-size: 11px;
+    border: 1px solid transparent;
+}
+.queue-item:hover { border-color: var(--accent-color); }

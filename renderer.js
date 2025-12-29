@@ -12,33 +12,57 @@ let state = {
   prompt: '',
   references: [], // { hash, mimeType, data (base64) }
   requests: [], // { id, status, prompt, resolution, ratio, references, timestamp, resultPath, error }
-  currentRequestId: null
+  currentRequestId: null,
+  activeProject: null, // { title, imageName, imagePath }
+  
+  // Conveyor State
+  conveyorQueue: [],
+  activeConveyor: null, // { id, prompt, generalRefs, conveyorRefs, currentIdx, total }
+  isConveyorRunning: false,
+  conveyorDraft: {
+      prompt: '',
+      generalRefs: [], // Array of file paths or objects
+      conveyorRefs: [] // Array of file paths or objects
+  }
 };
 
 let INPUT_DIR = null;
+let OUTPUT_DIR = null; // Track this too
 
 // --- Init ---
 (async () => {
     try {
-        const paths = await ipcRenderer.invoke('get-paths');
-        INPUT_DIR = paths.inputDir;
-        if (!fs.existsSync(INPUT_DIR)) {
-            fs.mkdirSync(INPUT_DIR, { recursive: true });
-        }
-        log(`Input directory ready: ${INPUT_DIR}`);
+        await updatePaths();
+        log(`System ready. Input: ${INPUT_DIR}`);
         
         // Initial library load
+        await loadProjectsLibrary(); // New
         await loadInputLibrary();
         await loadOutputLibrary();
+        
+        // Init Conveyor UI
+        updateConveyorStatusUI();
         
     } catch (e) {
         log(`Error initializing paths: ${e.message}`, 'error');
     }
 })();
 
+async function updatePaths() {
+    const paths = await ipcRenderer.invoke('get-project-details', state.activeProject ? state.activeProject.title : null);
+    INPUT_DIR = paths.input;
+    OUTPUT_DIR = paths.output;
+    
+    // Ensure dirs exist (renderer shouldn't strictly do this but good for safety if we write directly)
+    if (!fs.existsSync(INPUT_DIR)) fs.mkdirSync(INPUT_DIR, { recursive: true });
+}
+
 // Listen for debug logs from main process
-ipcRenderer.on('debug-log', (event, ...args) => {
-    console.log('[Main Process]:', ...args);
+ipcRenderer.on('debug-log', async (event, ...args) => {
+    const settings = await ipcRenderer.invoke('get-settings');
+    if (settings.debugMode) {
+        console.log('[Main Process]:', ...args);
+    }
 });
 
 // --- DOM Elements ---
@@ -58,7 +82,7 @@ const els = {
   restoreDrop: document.getElementById('restore-drop-zone'),
   
   generateBtn: document.getElementById('generate-btn'),
-  requestList: document.getElementById('request-list'), // New
+  requestList: document.getElementById('request-list'),
   
   previewArea: document.getElementById('image-preview-container'),
   placeholder: document.getElementById('placeholder-state'),
@@ -68,15 +92,294 @@ const els = {
   
   resetBtn: document.getElementById('reset-btn'),
 
-  
+  // Libraries
+  libraryListProjects: document.getElementById('library-list-projects'),
+  btnAddProject: document.getElementById('btn-add-project'),
+
   libraryListInput: document.getElementById('library-list-input'),
   libraryCountInput: document.getElementById('library-count-input'),
   
   libraryListOutput: document.getElementById('library-list-output'),
   libraryCountOutput: document.getElementById('library-count-output'),
   
-  logs: document.getElementById('logs-output')
+  logs: document.getElementById('logs-output'),
+
+  // Settings
+  settingsOverlay: document.getElementById('settings-overlay'),
+  btnSettings: document.getElementById('btn-settings'),
+  btnCloseSettings: document.getElementById('btn-close-settings'),
+  btnSaveSettings: document.getElementById('btn-save-settings'),
+  apiKeyInput: document.getElementById('api-key-input'),
+  debugCheckbox: document.getElementById('debug-mode-checkbox'),
+
+  // Project Overlay
+  projectOverlay: document.getElementById('project-overlay'),
+  btnCloseProject: document.getElementById('btn-close-project'),
+  btnSaveProject: document.getElementById('btn-save-project'),
+  projectTitleInput: document.getElementById('project-title-input'),
+  projectPreviewImg: document.getElementById('project-new-preview-img'),
+  projectPreviewPlaceholder: document.getElementById('project-new-preview-placeholder'),
+  projectImageGrid: document.getElementById('project-image-grid'),
+
+  hoverPreview: document.getElementById('hover-preview'),
+  hoverPreviewImg: document.getElementById('hover-preview-img'),
+
+  // Conveyor Elements
+  conveyorStatusBox: document.getElementById('conveyor-status-box'),
+  conveyorPromptPreview: document.getElementById('conveyor-prompt-preview'),
+  conveyorCounter: document.getElementById('conveyor-counter'),
+  btnStopConveyor: document.getElementById('btn-stop-conveyor'),
+  btnAddConveyor: document.getElementById('btn-add-conveyor'),
+  
+  conveyorOverlay: document.getElementById('conveyor-overlay'),
+  btnCloseConveyor: document.getElementById('btn-close-conveyor'),
+  conveyorLibraryGrid: document.getElementById('conveyor-library-grid'),
+  conveyorPromptInput: document.getElementById('conveyor-prompt-input'),
+  conveyorGenRefList: document.getElementById('conveyor-gen-ref-list'),
+  conveyorGenRefCount: document.getElementById('conveyor-gen-ref-count'),
+  conveyorImgList: document.getElementById('conveyor-img-list'),
+  conveyorImgCount: document.getElementById('conveyor-img-count'),
+  btnExecuteConveyor: document.getElementById('btn-execute-conveyor'),
+
+  conveyorDetailsOverlay: document.getElementById('conveyor-details-overlay'),
+  detailsPrompt: document.getElementById('details-prompt'),
+  detailsGenRefs: document.getElementById('details-gen-refs'),
+  detailsConvList: document.getElementById('details-conv-list'),
+
+  conveyorQueueOverlay: document.getElementById('conveyor-queue-overlay'),
+  conveyorQueueList: document.getElementById('conveyor-queue-list')
 };
+
+// --- Projects Logic ---
+let newProjectSelectedImage = null; // path
+
+async function loadProjectsLibrary() {
+    try {
+        const projects = await ipcRenderer.invoke('list-projects');
+        els.libraryListProjects.innerHTML = '';
+        
+        // Add "All Projects" / "Root" item? 
+        // Spec: "clicking on project in library switches content..."
+        // Doesn't explicitly ask for a "Home" button, but users need a way to go back to root.
+        // I will add a "Root / Default" item at the top.
+        
+        const rootDiv = document.createElement('div');
+        rootDiv.className = `library-item ${state.activeProject === null ? 'active-project' : ''}`;
+        rootDiv.innerHTML = `
+            <div style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; background:#222; color:#555; font-size:40px;">🏠</div>
+            <div class="project-title-overlay">Default</div>
+        `;
+        rootDiv.addEventListener('click', () => switchProject(null));
+        els.libraryListProjects.appendChild(rootDiv);
+
+        projects.forEach(proj => {
+            const div = document.createElement('div');
+            div.className = `library-item ${state.activeProject && state.activeProject.title === proj.title ? 'active-project' : ''}`;
+            
+            const img = document.createElement('img');
+            img.src = `file://${proj.imagePath}`;
+            img.className = 'library-thumb';
+            img.loading = 'lazy';
+            
+            const titleOverlay = document.createElement('div');
+            titleOverlay.className = 'project-title-overlay';
+            titleOverlay.textContent = proj.title;
+            
+            div.appendChild(img);
+            div.appendChild(titleOverlay);
+            
+            div.addEventListener('click', () => switchProject(proj));
+            setupHoverPreview(div, () => img.src);
+            
+            els.libraryListProjects.appendChild(div);
+        });
+
+    } catch (e) {
+        log(`Error loading projects: ${e.message}`, 'error');
+    }
+}
+
+async function switchProject(project) {
+    state.activeProject = project;
+    
+    // Update active class in UI
+    const items = els.libraryListProjects.querySelectorAll('.library-item');
+    items.forEach(item => {
+        // Simple check based on text content or index? 
+        // Ideally we track ID.
+        item.classList.remove('active-project');
+    });
+    // Re-render to set active class properly (easier than finding the element)
+    await loadProjectsLibrary();
+
+    log(`Switched to project: ${project ? project.title : 'Default'}`);
+    
+    // Update Paths
+    await updatePaths();
+    
+    // Refresh Libraries
+    await loadInputLibrary();
+    await loadOutputLibrary();
+}
+
+els.btnAddProject.addEventListener('click', async () => {
+    // Open Modal
+    els.projectTitleInput.value = '';
+    els.projectPreviewImg.src = '';
+    els.projectPreviewImg.classList.add('hidden');
+    els.projectPreviewPlaceholder.classList.remove('hidden');
+    newProjectSelectedImage = null;
+    
+    // Load images for grid
+    await loadProjectCreationGrid();
+    
+    els.projectOverlay.classList.remove('hidden');
+});
+
+els.btnCloseProject.addEventListener('click', () => {
+    els.projectOverlay.classList.add('hidden');
+});
+
+async function loadProjectCreationGrid() {
+    els.projectImageGrid.innerHTML = '';
+    // Use current input library images
+    try {
+        // We list inputs from the *current* context.
+        // If user wants images from Root, they should switch to Root first?
+        // Spec: "3.3 ... all images from input library".
+        // I will interpret this as "currently visible inputs".
+        const files = await ipcRenderer.invoke('list-input-files', state.activeProject ? state.activeProject.title : null);
+        
+        files.forEach(file => {
+            const div = document.createElement('div');
+            div.className = 'grid-item';
+            
+            const img = document.createElement('img');
+            img.src = `file://${file.path}`;
+            
+            div.appendChild(img);
+            
+            div.addEventListener('click', () => {
+                // Select
+                els.projectImageGrid.querySelectorAll('.grid-item').forEach(d => d.classList.remove('selected'));
+                div.classList.add('selected');
+                
+                // Update preview
+                els.projectPreviewImg.src = img.src;
+                els.projectPreviewImg.classList.remove('hidden');
+                els.projectPreviewPlaceholder.classList.add('hidden');
+                newProjectSelectedImage = file.path;
+            });
+            
+            els.projectImageGrid.appendChild(div);
+        });
+    } catch (e) {
+        log(`Error loading grid: ${e.message}`, 'error');
+    }
+}
+
+els.btnSaveProject.addEventListener('click', async () => {
+    const title = els.projectTitleInput.value.trim();
+    if (!title) {
+        alert('Please enter a title.');
+        return;
+    }
+    if (!newProjectSelectedImage) {
+        alert('Please select a preview image.');
+        return;
+    }
+    
+    const result = await ipcRenderer.invoke('create-project', {
+        title,
+        sourceImagePath: newProjectSelectedImage
+    });
+    
+    if (result.success) {
+        log(`Project '${title}' created.`, 'success');
+        els.projectOverlay.classList.add('hidden');
+        await loadProjectsLibrary();
+    } else {
+        alert(`Failed to create project: ${result.error}`);
+    }
+});
+
+
+// --- Hover Preview Logic ---
+function setupHoverPreview(element, getSrc) {
+    element.addEventListener('mouseenter', () => {
+        const src = getSrc();
+        if (!src) return;
+        
+        els.hoverPreviewImg.src = src;
+        els.hoverPreview.classList.remove('hidden');
+        updateHoverPreviewPos(element);
+    });
+
+    element.addEventListener('mouseleave', () => {
+        els.hoverPreview.classList.add('hidden');
+        els.hoverPreviewImg.src = '';
+    });
+}
+
+function updateHoverPreviewPos(element) {
+    const rect = element.getBoundingClientRect();
+    const offset = 10;
+    
+    // Default position: to the right of the element
+    let x = rect.right + offset;
+    let y = rect.top;
+
+    // Check if the preview is ready to get its size
+    const previewRect = els.hoverPreview.getBoundingClientRect();
+    
+    // If it goes off the right edge, place it to the left of the element
+    if (x + previewRect.width > window.innerWidth) {
+        x = rect.left - previewRect.width - offset;
+    }
+    
+    // If it still goes off the left edge, center it horizontally
+    if (x < 0) {
+        x = (window.innerWidth - previewRect.width) / 2;
+    }
+
+    // Vertical boundary check
+    if (y + previewRect.height > window.innerHeight) {
+        y = window.innerHeight - previewRect.height - offset;
+    }
+    if (y < 0) y = offset;
+
+    els.hoverPreview.style.left = `${x}px`;
+    els.hoverPreview.style.top = `${y}px`;
+}
+
+// --- Settings Logic ---
+async function openSettings() {
+    const settings = await ipcRenderer.invoke('get-settings');
+    els.debugCheckbox.checked = settings.debugMode;
+    els.apiKeyInput.value = ''; // Always empty as per requirement
+    els.settingsOverlay.classList.remove('hidden');
+}
+
+function closeSettings() {
+    els.settingsOverlay.classList.add('hidden');
+}
+
+async function saveSettings() {
+    const apiKey = els.apiKeyInput.value;
+    const debugMode = els.debugCheckbox.checked;
+    
+    const result = await ipcRenderer.invoke('save-settings', { apiKey, debugMode });
+    if (result.success) {
+        log('Settings saved.', 'success');
+        closeSettings();
+    } else {
+        log(`Failed to save settings: ${result.error}`, 'error');
+    }
+}
+
+els.btnSettings.addEventListener('click', openSettings);
+els.btnCloseSettings.addEventListener('click', closeSettings);
+els.btnSaveSettings.addEventListener('click', saveSettings);
 
 // --- Logging ---
 function log(msg, type = 'info') {
@@ -137,6 +440,8 @@ function renderRefList() {
         container.appendChild(img);
         container.appendChild(overlay);
         
+        setupHoverPreview(container, () => img.src);
+
         // Prevent drag events on the image from interfering with the drop zone
         container.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -263,7 +568,7 @@ function updateMainView(req) {
 // --- Library Management ---
 async function loadOutputLibrary() {
     try {
-        const files = await ipcRenderer.invoke('list-output-files');
+        const files = await ipcRenderer.invoke('list-output-files', state.activeProject ? state.activeProject.title : null);
         els.libraryListOutput.innerHTML = '';
         if (els.libraryCountOutput) els.libraryCountOutput.textContent = files.length;
         
@@ -287,6 +592,20 @@ async function loadOutputLibrary() {
             const counterSpan = document.createElement('span');
             counterSpan.className = 'library-item-counter';
             counterSpan.textContent = idx + 1;
+            
+            const deleteBtn = document.createElement('div');
+            deleteBtn.className = 'library-delete-btn';
+            deleteBtn.textContent = '✕';
+            deleteBtn.title = 'Delete Image';
+            deleteBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const res = await ipcRenderer.invoke('delete-file', file.path);
+                if (res.success) {
+                    loadOutputLibrary();
+                } else {
+                    log(`Failed to delete: ${res.error}`, 'error');
+                }
+            });
             
             const topZone = document.createElement('div');
             topZone.className = 'lib-overlay-top';
@@ -318,9 +637,12 @@ async function loadOutputLibrary() {
 
             div.appendChild(img);
             div.appendChild(counterSpan);
+            div.appendChild(deleteBtn);
             div.appendChild(topZone);
             div.appendChild(bottomZone);
             
+            setupHoverPreview(div, () => img.src);
+
             els.libraryListOutput.appendChild(div);
         });
 
@@ -338,7 +660,7 @@ async function loadOutputLibrary() {
 
 async function loadInputLibrary() {
     try {
-        const files = await ipcRenderer.invoke('list-input-files');
+        const files = await ipcRenderer.invoke('list-input-files', state.activeProject ? state.activeProject.title : null);
         els.libraryListInput.innerHTML = '';
         if (els.libraryCountInput) els.libraryCountInput.textContent = files.length;
         
@@ -363,6 +685,20 @@ async function loadInputLibrary() {
             counterSpan.className = 'library-item-counter';
             counterSpan.textContent = idx + 1; 
             
+            const deleteBtn = document.createElement('div');
+            deleteBtn.className = 'library-delete-btn';
+            deleteBtn.textContent = '✕';
+            deleteBtn.title = 'Delete Image';
+            deleteBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const res = await ipcRenderer.invoke('delete-file', file.path);
+                if (res.success) {
+                    loadInputLibrary();
+                } else {
+                    log(`Failed to delete: ${res.error}`, 'error');
+                }
+            });
+            
             const overlay = document.createElement('div');
             overlay.className = 'lib-overlay-single';
             
@@ -373,8 +709,11 @@ async function loadInputLibrary() {
 
             div.appendChild(img);
             div.appendChild(counterSpan);
+            div.appendChild(deleteBtn);
             div.appendChild(overlay);
             
+            setupHoverPreview(div, () => img.src);
+
             els.libraryListInput.appendChild(div);
         });
 
@@ -410,7 +749,7 @@ async function addLibraryImageToReference(filePath) {
         let ext = path.extname(filePath).substring(1);
         
         const saveName = `${hash}.${ext}`;
-        const savePath = path.join(INPUT_DIR, saveName);
+        const savePath = path.join(INPUT_DIR, saveName); // Uses active INPUT_DIR
         
         if (!fs.existsSync(savePath)) {
             fs.writeFileSync(savePath, buffer);
@@ -422,7 +761,8 @@ async function addLibraryImageToReference(filePath) {
         state.references.push({
             hash,
             mimeType,
-            data: buffer.toString('base64')
+            data: buffer.toString('base64'),
+            extension: ext
         });
         
         updateStateUI();
@@ -523,7 +863,7 @@ async function handleRefFiles(files) {
       if (!ext) ext = 'png'; 
       
       const saveName = `${hash}.${ext}`;
-      const savePath = path.join(INPUT_DIR, saveName);
+      const savePath = path.join(INPUT_DIR, saveName); // Uses active INPUT_DIR
       
       if (!fs.existsSync(savePath)) {
           fs.writeFileSync(savePath, buffer);
@@ -539,7 +879,8 @@ async function handleRefFiles(files) {
       state.references.push({
         hash,
         mimeType: file.type,
-        data: base64
+        data: base64,
+        extension: ext
       });
       
     } catch (err) {
@@ -599,17 +940,20 @@ async function restoreContext(filePath) {
       
       state.references = [];
       if (data.referenceImages && Array.isArray(data.referenceImages)) {
-          const files = fs.readdirSync(INPUT_DIR);
+          const files = fs.readdirSync(INPUT_DIR); // Uses active INPUT_DIR
           
           for (const ref of data.referenceImages) {
               const match = files.find(f => f.startsWith(ref.hash));
               if (match) {
                   const refPath = path.join(INPUT_DIR, match);
                   const refBuffer = fs.readFileSync(refPath);
+                  const ext = path.extname(match).substring(1);
+
                   state.references.push({
                       hash: ref.hash,
                       mimeType: ref.mimeType,
-                      data: refBuffer.toString('base64')
+                      data: refBuffer.toString('base64'),
+                      extension: ext
                   });
               } else {
                   log(`Reference not found: ${ref.hash}`, 'warn');
@@ -694,7 +1038,8 @@ els.generateBtn.addEventListener('click', () => {
     prompt: reqObj.prompt,
     resolution: reqObj.resolution,
     ratio: reqObj.ratio,
-    referenceImages: reqObj.references.map(r => ({ hash: r.hash, mimeType: r.mimeType }))
+    referenceImages: reqObj.references.map(r => ({ hash: r.hash, mimeType: r.mimeType, extension: r.extension })),
+    project: state.activeProject ? state.activeProject.title : null
   };
 
   // Call IPC without await blocking the function
@@ -735,6 +1080,7 @@ els.generateBtn.addEventListener('click', () => {
     });
 });
 
+
 // --- Title Bar Controls ---
 document.getElementById('btn-minimize').addEventListener('click', () => {
     ipcRenderer.invoke('window-minimize');
@@ -747,3 +1093,332 @@ document.getElementById('btn-maximize').addEventListener('click', () => {
 document.getElementById('btn-close').addEventListener('click', () => {
     ipcRenderer.invoke('window-close');
 });
+
+
+// --- Conveyor Logic ---
+
+// 1. Creation Modal
+els.btnAddConveyor.addEventListener('click', async () => {
+    // Reset draft
+    state.conveyorDraft = { prompt: '', generalRefs: [], conveyorRefs: [] };
+    els.conveyorPromptInput.value = '';
+    updateConveyorDraftUI();
+    
+    await loadConveyorLibrary();
+    els.conveyorOverlay.classList.remove('hidden');
+});
+
+els.btnCloseConveyor.addEventListener('click', () => {
+    els.conveyorOverlay.classList.add('hidden');
+});
+
+async function loadConveyorLibrary() {
+    els.conveyorLibraryGrid.innerHTML = '';
+    try {
+        const inputs = await ipcRenderer.invoke('list-input-files', state.activeProject ? state.activeProject.title : null);
+        const outputs = await ipcRenderer.invoke('list-output-files', state.activeProject ? state.activeProject.title : null);
+        
+        // Merge and sort by time
+        const allFiles = [...inputs, ...outputs].sort((a, b) => b.mtime - a.mtime);
+        
+        allFiles.forEach(file => {
+            const div = document.createElement('div');
+            div.className = 'conveyor-lib-item';
+            
+            const img = document.createElement('img');
+            img.src = `file://${file.path}`;
+            
+            // Zones
+            const zoneGen = document.createElement('div');
+            zoneGen.className = 'zone-general';
+            zoneGen.textContent = 'General';
+            zoneGen.addEventListener('click', () => addToConveyorDraft(file, 'general'));
+            
+            const zoneConv = document.createElement('div');
+            zoneConv.className = 'zone-conveyor';
+            zoneConv.textContent = 'Conveyor';
+            zoneConv.addEventListener('click', () => addToConveyorDraft(file, 'conveyor'));
+            
+            div.appendChild(img);
+            div.appendChild(zoneGen);
+            div.appendChild(zoneConv);
+            
+            els.conveyorLibraryGrid.appendChild(div);
+        });
+    } catch (e) {
+        log(`Error loading conveyor library: ${e.message}`, 'error');
+    }
+}
+
+function addToConveyorDraft(file, type) {
+    if (type === 'general') {
+        if (state.conveyorDraft.generalRefs.find(f => f.path === file.path)) return; // No dupes
+        state.conveyorDraft.generalRefs.push(file);
+    } else {
+        // Allow dupes in conveyor list? Usually yes, user might want to process same image twice? 
+        // Let's assume no dupes for now to be safe, or yes? "list of conveyor preview images" -> implies sequence.
+        // Let's allow dupes.
+        state.conveyorDraft.conveyorRefs.push(file);
+    }
+    updateConveyorDraftUI();
+}
+
+function updateConveyorDraftUI() {
+    // General Refs
+    els.conveyorGenRefList.innerHTML = '';
+    els.conveyorGenRefCount.textContent = `(${state.conveyorDraft.generalRefs.length})`;
+    state.conveyorDraft.generalRefs.forEach((file, idx) => {
+        const img = document.createElement('img');
+        img.src = `file://${file.path}`;
+        img.className = 'mini-ref-thumb';
+        img.title = 'Click to remove';
+        img.addEventListener('click', () => {
+            state.conveyorDraft.generalRefs.splice(idx, 1);
+            updateConveyorDraftUI();
+        });
+        els.conveyorGenRefList.appendChild(img);
+    });
+
+    // Conveyor Refs
+    els.conveyorImgList.innerHTML = '';
+    els.conveyorImgCount.textContent = `(${state.conveyorDraft.conveyorRefs.length})`;
+    state.conveyorDraft.conveyorRefs.forEach((file, idx) => {
+        const img = document.createElement('img');
+        img.src = `file://${file.path}`;
+        img.className = 'mini-ref-thumb';
+        img.title = 'Click to remove';
+        img.addEventListener('click', () => {
+            state.conveyorDraft.conveyorRefs.splice(idx, 1);
+            updateConveyorDraftUI();
+        });
+        els.conveyorImgList.appendChild(img);
+    });
+}
+
+// 2. Execution
+els.btnExecuteConveyor.addEventListener('click', () => {
+    const prompt = els.conveyorPromptInput.value.trim();
+    if (!prompt) {
+        alert('Please enter a general prompt.');
+        return;
+    }
+    if (state.conveyorDraft.conveyorRefs.length === 0) {
+        alert('Please add at least one conveyor image.');
+        return;
+    }
+
+    // Create Conveyor Object
+    const conveyor = {
+        id: Date.now(),
+        prompt: prompt,
+        // Clone lists
+        generalRefs: [...state.conveyorDraft.generalRefs],
+        conveyorRefs: [...state.conveyorDraft.conveyorRefs],
+        currentIdx: 0,
+        total: state.conveyorDraft.conveyorRefs.length
+    };
+
+    state.conveyorQueue.push(conveyor);
+    
+    // UI Update
+    els.conveyorOverlay.classList.add('hidden');
+    updateConveyorStatusUI();
+    
+    // Start if not running
+    if (!state.isConveyorRunning) {
+        processConveyorQueue();
+    } else {
+        log('Conveyor queued.');
+    }
+});
+
+async function processConveyorQueue() {
+    if (state.conveyorQueue.length === 0) {
+        state.isConveyorRunning = false;
+        state.activeConveyor = null;
+        updateConveyorStatusUI();
+        log('All conveyors finished.');
+        return;
+    }
+
+    state.isConveyorRunning = true;
+    state.activeConveyor = state.conveyorQueue[0];
+    updateConveyorStatusUI();
+
+    const conv = state.activeConveyor;
+    log(`Starting conveyor ${conv.id}. Tasks: ${conv.total}`);
+
+    while (conv.currentIdx < conv.total) {
+        // Check if still active (might be stopped by user)
+        if (state.activeConveyor !== conv) return; 
+
+        // 1. Prepare Request
+        const currentRefImage = conv.conveyorRefs[conv.currentIdx];
+        
+        // Convert files to the format generate-image expects
+        // It needs { hash, mimeType, extension }
+        // We have file paths. We need to read them to get hash/mime.
+        // Helper to prepare ref object
+        const prepareRef = (filePath) => {
+            const buffer = fs.readFileSync(filePath);
+            const hash = crypto.createHash('md5').update(buffer).digest('hex');
+            const ext = path.extname(filePath).substring(1);
+            const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+            return { hash, mimeType, extension: ext };
+        };
+
+        const finalRefs = [];
+        // Add General Refs
+        for (const f of conv.generalRefs) finalRefs.push(prepareRef(f.path));
+        // Add Current Conveyor Ref
+        finalRefs.push(prepareRef(currentRefImage.path));
+
+        const reqId = Date.now(); // unique ID for this sub-request
+        
+        // UI Update (Counter)
+        updateConveyorStatusUI();
+
+        // 2. Execute Generation (Reuse existing IPC)
+        // Note: This does NOT add to the main "state.requests" list automatically unless we want it to.
+        // The prompt says "generated images should be saved in same way as old method... with injected metadata".
+        // The IPC 'generate-image' does exactly that.
+        // If we want it to show up in the main UI's request list, we should add it there too.
+        
+        // Let's add it to main request list for visibility? 
+        // "conveyor does not interact with basic UI elements... it works under the hood". 
+        // Maybe we shouldn't clutter the main request list.
+        // But "live counter... generated images should be saved...".
+        // I will just call IPC.
+        
+        try {
+            log(`Conveyor ${conv.id}: generating ${conv.currentIdx + 1}/${conv.total}...`);
+            const result = await ipcRenderer.invoke('generate-image', {
+                prompt: conv.prompt,
+                resolution: '1K', // Default?
+                ratio: '1:1', // Default?
+                referenceImages: finalRefs,
+                project: state.activeProject ? state.activeProject.title : null
+            });
+
+            if (result.success) {
+                log(`Conveyor item finished: ${path.basename(result.path)}`, 'success');
+            } else {
+                log(`Conveyor item failed: ${result.error}`, 'error');
+            }
+        } catch (err) {
+            log(`Conveyor item crashed: ${err.message}`, 'error');
+        }
+
+        conv.currentIdx++;
+        updateConveyorStatusUI();
+    }
+
+    // Done with this conveyor
+    state.conveyorQueue.shift(); // Remove head
+    processConveyorQueue(); // Process next
+}
+
+// 3. Status UI & Overlays
+function updateConveyorStatusUI() {
+    if (!state.activeConveyor) {
+        els.conveyorStatusBox.classList.add('hidden');
+        return;
+    }
+
+    els.conveyorStatusBox.classList.remove('hidden');
+    els.conveyorPromptPreview.textContent = state.activeConveyor.prompt;
+    els.conveyorCounter.textContent = `${state.activeConveyor.currentIdx}/${state.activeConveyor.total}`;
+}
+
+els.btnStopConveyor.addEventListener('click', () => {
+    if (state.activeConveyor) {
+        if (confirm('Stop current conveyor?')) {
+            state.activeConveyor = null; // Break loop
+            state.conveyorQueue.shift(); // Remove current
+            state.isConveyorRunning = false;
+            processConveyorQueue(); // Will likely just stop or pick next
+        }
+    }
+});
+
+// Hover Logic
+els.conveyorStatusBox.addEventListener('mouseenter', () => {
+    // Show Overlays
+    updateDetailsOverlay(state.activeConveyor);
+    updateQueueOverlay();
+    
+    els.conveyorDetailsOverlay.classList.remove('hidden');
+    if (state.conveyorQueue.length > 1) {
+        els.conveyorQueueOverlay.classList.remove('hidden');
+    }
+    
+    // Position
+    const rect = els.conveyorStatusBox.getBoundingClientRect();
+    // Detail (Right)
+    els.conveyorDetailsOverlay.style.left = `${rect.right + 10}px`;
+    els.conveyorDetailsOverlay.style.top = `${rect.top}px`;
+    
+    // Queue (Above)
+    els.conveyorQueueOverlay.style.left = `${rect.left}px`;
+    els.conveyorQueueOverlay.style.bottom = `${window.innerHeight - rect.top + 10}px`;
+});
+
+els.conveyorStatusBox.addEventListener('mouseleave', () => {
+    els.conveyorDetailsOverlay.classList.add('hidden');
+    els.conveyorQueueOverlay.classList.add('hidden');
+});
+
+function updateDetailsOverlay(conv) {
+    if (!conv) return;
+    els.detailsPrompt.textContent = conv.prompt;
+    
+    // Gen Refs
+    els.detailsGenRefs.innerHTML = '';
+    conv.generalRefs.forEach(f => {
+        const img = document.createElement('img');
+        img.src = `file://${f.path}`;
+        els.detailsGenRefs.appendChild(img);
+    });
+    
+    // Conveyor List
+    els.detailsConvList.innerHTML = '';
+    conv.conveyorRefs.forEach((f, idx) => {
+        const img = document.createElement('img');
+        img.src = `file://${f.path}`;
+        // Highlight current?
+        if (idx === conv.currentIdx) {
+            img.style.border = '2px solid var(--accent-color)';
+        } else if (idx < conv.currentIdx) {
+            img.style.opacity = '0.5';
+        }
+        els.detailsConvList.appendChild(img);
+    });
+}
+
+function updateQueueOverlay() {
+    els.conveyorQueueList.innerHTML = '';
+    // Skip first (active)
+    const queue = state.conveyorQueue.slice(1);
+    
+    if (queue.length === 0) return;
+
+    queue.forEach(conv => {
+        const item = document.createElement('div');
+        item.className = 'queue-item';
+        item.innerHTML = `
+            <div style="font-weight:bold; color:var(--accent-color)">${conv.total} images</div>
+            <div style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${conv.prompt}</div>
+        `;
+        
+        item.addEventListener('mouseenter', () => {
+            updateDetailsOverlay(conv); // Show details for this queued item
+        });
+        
+        // On leave, show active again?
+        item.addEventListener('mouseleave', () => {
+            updateDetailsOverlay(state.activeConveyor);
+        });
+
+        els.conveyorQueueList.appendChild(item);
+    });
+}

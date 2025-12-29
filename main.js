@@ -12,6 +12,7 @@ app.commandLine.appendSwitch('use-gl', 'swiftshader');
 app.commandLine.appendSwitch('use-angle', 'swiftshader');
 app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-gpu-sandbox');
+app.commandLine.appendSwitch('disable-features', 'Autofill');
 
 app.commandLine.appendSwitch('proxy-server', `127.0.0.1:2080`);
 
@@ -70,6 +71,71 @@ function injectPngMetadata(buffer, key, value) {
   return Buffer.concat([buffer.slice(0, iendIdx), chunk, buffer.slice(iendIdx)]);
 }
 
+// --- Settings Management ---
+const CONFIG_FILE = path.join(__dirname, 'config.json');
+
+function loadConfig() {
+    if (fs.existsSync(CONFIG_FILE)) {
+        try {
+            return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+        } catch (e) {
+            console.error('Failed to load config:', e);
+        }
+    }
+    return { debugMode: false };
+}
+
+function saveConfig(config) {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+let appConfig = loadConfig();
+
+// Custom logger
+const logger = {
+    log: (...args) => { if (appConfig.debugMode) console.log(...args); },
+    error: (...args) => { if (appConfig.debugMode) console.error(...args); },
+    warn: (...args) => { if (appConfig.debugMode) console.warn(...args); }
+};
+
+ipcMain.handle('get-settings', () => {
+    return { debugMode: appConfig.debugMode };
+});
+
+ipcMain.handle('save-settings', async (event, { apiKey, debugMode }) => {
+    // Save debug mode
+    appConfig.debugMode = debugMode;
+    saveConfig(appConfig);
+
+    // Save API key if provided
+    if (apiKey && apiKey.trim()) {
+        const envPath = path.join(__dirname, '.env');
+        let envContent = '';
+        if (fs.existsSync(envPath)) {
+            envContent = fs.readFileSync(envPath, 'utf8');
+        }
+        
+        const lines = envContent.split(/\r?\n/);
+        let keyFound = false;
+        const newLines = lines.map(line => {
+            if (line.startsWith('GEMINI_API_KEY=')) {
+                keyFound = true;
+                return `GEMINI_API_KEY=${apiKey.trim()}`;
+            }
+            return line;
+        });
+        
+        if (!keyFound) {
+            newLines.push(`GEMINI_API_KEY=${apiKey.trim()}`);
+        }
+        
+        fs.writeFileSync(envPath, newLines.join('\n'));
+        process.env.GEMINI_API_KEY = apiKey.trim(); // Update in current process
+    }
+    
+    return { success: true };
+});
+
 // --- Window Management ---
 function createWindow () {
   const mainWindow = new BrowserWindow({
@@ -105,7 +171,7 @@ function createWindow () {
 }
 
 app.whenReady().then(() => {
-  console.log("App is ready, creating window...");
+  logger.log("App is ready, creating window...");
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -118,7 +184,41 @@ app.on('window-all-closed', () => {
 
 // --- GenAI Logic ---
 
-ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, referenceImages }) => {
+function getSafeDirectoryName(title) {
+    if (!title) return null;
+    return title.trim(); // Windows/Linux/Mac handle most chars fine, maybe just trim. 
+    // If strict sanitization is desired:
+    // return title.trim().replace(/[^a-z0-9 \-_]/gi, '_').toLowerCase();
+    // For now, let's stick to simple trim to allow non-latin chars if user wants, 
+    // unless it causes issues. But 'create-project' previously used strict sanitization.
+    // Let's use the strict one to be safe and consistent with previous attempt.
+    // return title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    // Wait, if I change it now, I must stick to one.
+    // The requirement didn't specify, but "banana.pots" style implies fun. 
+    // Let's use:
+    return title.trim().replace(/[\/\\:*?"<>|]/g, '_'); // Basic OS invalid char replacement
+}
+
+// Helper to get project paths
+function getProjectPaths(projectTitle) {
+    const safeName = getSafeDirectoryName(projectTitle);
+    if (!safeName) {
+        return {
+            input: path.join(__dirname, 'input'),
+            output: path.join(__dirname, 'output')
+        };
+    }
+    return {
+        input: path.join(__dirname, 'input', safeName),
+        output: path.join(__dirname, 'output', safeName)
+    };
+}
+
+ipcMain.handle('get-project-details', (event, title) => {
+    return getProjectPaths(title);
+});
+
+ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, referenceImages, project }) => {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -147,12 +247,13 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
     parts.push({ text: prompt });
 
     // Add reference images
-    // Paths are now relative to the application root
-    const inputDir = path.join(__dirname, 'input');
+    // Paths are now relative to the application root or project folder
+    // The reference images usually come from the current input directory
+    const { input: inputDir } = getProjectPaths(project);
     
     for (const ref of referenceImages) {
-        // ref should be { hash, mimeType }
-        const ext = mime.getExtension(ref.mimeType);
+        // ref should be { hash, mimeType, extension? }
+        const ext = ref.extension || mime.getExtension(ref.mimeType);
         const filename = `${ref.hash}.${ext}`;
         const filePath = path.join(inputDir, filename);
 
@@ -165,8 +266,9 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
                 }
             });
         } else {
-            console.warn(`Reference image not found: ${filePath}`);
-            // Optionally throw error or skip
+            logger.warn(`Reference image not found: ${filePath}`);
+            // Check global input dir as fallback?
+            // For now, strict project scope.
         }
     }
 
@@ -175,7 +277,7 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
     // Send contents to renderer console for debugging
     event.sender.send('debug-log', 'Contents being sent to Gemini:', JSON.stringify(contents, null, 2));
 
-    console.log('Sending request to Gemini...');
+    logger.log('Sending request to Gemini...');
     // Send Request
     const responseStream = await ai.models.generateContentStream({
       model,
@@ -186,24 +288,36 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
     let finalBuffer = null;
     let finalMime = 'image/png'; // default assumption
 
-    console.log('Reading stream...');
+    logger.log('Reading stream...');
+    let collectedText = '';
     for await (const chunk of responseStream) {
         const cand = chunk.candidates?.[0];
-        if (cand?.content?.parts?.[0]?.inlineData) {
-            console.log('Received image chunk.');
-            const inlineData = cand.content.parts[0].inlineData;
-            finalMime = inlineData.mimeType || 'image/png';
-            finalBuffer = Buffer.from(inlineData.data || '', 'base64');
-            break; // Found the image
+        if (cand?.content?.parts) {
+            for (const part of cand.content.parts) {
+                if (part.inlineData) {
+                    logger.log('Received image chunk.');
+                    const inlineData = part.inlineData;
+                    finalMime = inlineData.mimeType || 'image/png';
+                    finalBuffer = Buffer.from(inlineData.data || '', 'base64');
+                }
+                if (part.text) {
+                    collectedText += part.text;
+                }
+            }
         }
+        if (finalBuffer) break;
     }
 
     if (!finalBuffer) {
-        console.error('No buffer received.');
+        if (collectedText) {
+            logger.error('API returned text instead of image:', collectedText);
+            event.sender.send('debug-log', 'API Response Text:', collectedText);
+        }
+        logger.error('No buffer received.');
         throw new Error('No image data received from API.');
     }
 
-    console.log(`Image received. Size: ${finalBuffer.length}, Mime: ${finalMime}`);
+    logger.log(`Image received. Size: ${finalBuffer.length}, Mime: ${finalMime}`);
 
     // --- Inject Metadata ---
     // Data to save
@@ -226,7 +340,7 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
 
     try {
         if (finalMime === 'image/jpeg') {
-            console.log('Injecting JPEG metadata...');
+            logger.log('Injecting JPEG metadata...');
             const exifObj = {
                 "Exif": {
                     [piexif.ExifIFD.UserComment]: "BananaAppMeta:" + safeMetaString
@@ -236,31 +350,31 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
             const newData = piexif.insert(exifBytes, finalBuffer.toString('binary'));
             savedBuffer = Buffer.from(newData, 'binary');
         } else if (finalMime === 'image/png') {
-            console.log('Injecting PNG metadata...');
+            logger.log('Injecting PNG metadata...');
             savedBuffer = injectPngMetadata(finalBuffer, 'BananaAppMeta', safeMetaString);
         }
     } catch (metaErr) {
-        console.error('Metadata injection failed, saving raw image:', metaErr);
+        logger.error('Metadata injection failed, saving raw image:', metaErr);
         // Fallback to original buffer if injection fails
         savedBuffer = finalBuffer;
     }
 
     // Save to file
     const fileName = `banana_${Date.now()}.${ext}`;
-    // Output path relative to app root
-    const savePath = path.join(__dirname, 'output');
-    console.log(`Saving to: ${savePath}`);
+    // Output path relative to app root or project
+    const { output: savePath } = getProjectPaths(project);
+    logger.log(`Saving to: ${savePath}`);
     
     await fs.promises.mkdir(savePath, { recursive: true });
     
     const fullPath = path.join(savePath, fileName);
     await fs.promises.writeFile(fullPath, savedBuffer);
-    console.log(`File written: ${fullPath}`);
+    logger.log(`File written: ${fullPath}`);
 
     return { success: true, path: fullPath };
 
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     return { success: false, error: error.message };
   }
 });
@@ -270,12 +384,26 @@ ipcMain.handle('get-paths', () => {
     return {
         documents: __dirname,
         inputDir: path.join(__dirname, 'input'),
-        outputDir: path.join(__dirname, 'output')
+        outputDir: path.join(__dirname, 'output'),
+        projectsDir: path.join(__dirname, 'projects')
     };
 });
 
-ipcMain.handle('list-output-files', () => {
-    const outputDir = path.join(__dirname, 'output');
+ipcMain.handle('delete-file', async (event, filePath) => {
+    try {
+        if (!fs.existsSync(filePath)) {
+            throw new Error('File not found');
+        }
+        await fs.promises.unlink(filePath);
+        return { success: true };
+    } catch (error) {
+        logger.error(`Failed to delete file ${filePath}:`, error);
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('list-output-files', (event, project) => {
+    const { output: outputDir } = getProjectPaths(project);
     if (!fs.existsSync(outputDir)) return [];
     
     const files = fs.readdirSync(outputDir)
@@ -294,8 +422,8 @@ ipcMain.handle('list-output-files', () => {
     return files;
 });
 
-ipcMain.handle('list-input-files', () => {
-    const inputDir = path.join(__dirname, 'input');
+ipcMain.handle('list-input-files', (event, project) => {
+    const { input: inputDir } = getProjectPaths(project);
     if (!fs.existsSync(inputDir)) return [];
     
     const files = fs.readdirSync(inputDir)
@@ -312,4 +440,72 @@ ipcMain.handle('list-input-files', () => {
         .sort((a, b) => b.mtime - a.mtime); // Newest first
         
     return files;
+});
+
+// --- Projects Logic ---
+const PROJECTS_DIR = path.join(__dirname, 'projects');
+const PROJECTS_FILE = path.join(PROJECTS_DIR, 'projects.json');
+
+function getProjectsData() {
+    if (!fs.existsSync(PROJECTS_FILE)) return [];
+    try {
+        return JSON.parse(fs.readFileSync(PROJECTS_FILE, 'utf8'));
+    } catch {
+        return [];
+    }
+}
+
+function saveProjectsData(data) {
+    if (!fs.existsSync(PROJECTS_DIR)) fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+    fs.writeFileSync(PROJECTS_FILE, JSON.stringify(data, null, 2));
+}
+
+ipcMain.handle('list-projects', () => {
+    const projects = getProjectsData();
+    // Return full paths for images
+    return projects.map(p => ({
+        ...p,
+        imagePath: path.join(PROJECTS_DIR, p.imageName)
+    }));
+});
+
+ipcMain.handle('create-project', async (event, { title, sourceImagePath }) => {
+    try {
+        if (!title) throw new Error("Title is required");
+        if (!sourceImagePath) throw new Error("Preview image is required");
+
+        // 1. Create Directories
+        const { input: inputDir, output: outputDir } = getProjectPaths(title);
+        if (!fs.existsSync(inputDir)) fs.mkdirSync(inputDir, { recursive: true });
+        if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+
+        // 2. Save Preview Image to projects dir
+        if (!fs.existsSync(PROJECTS_DIR)) fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+        
+        const ext = path.extname(sourceImagePath);
+        const safeTitle = getSafeDirectoryName(title);
+        const imageName = `${safeTitle}_preview${ext}`;
+        const targetImagePath = path.join(PROJECTS_DIR, imageName);
+        
+        fs.copyFileSync(sourceImagePath, targetImagePath);
+
+        // 3. Update JSON
+        const projects = getProjectsData();
+        if (projects.some(p => p.title === title)) {
+            throw new Error("Project with this title already exists");
+        }
+        
+        projects.push({
+            title,
+            imageName
+        });
+        
+        saveProjectsData(projects);
+
+        return { success: true };
+
+    } catch (err) {
+        logger.error("Failed to create project:", err);
+        return { success: false, error: err.message };
+    }
 });
