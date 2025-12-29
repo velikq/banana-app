@@ -19,8 +19,11 @@ let state = {
   conveyorQueue: [],
   activeConveyor: null, // { id, prompt, generalRefs, conveyorRefs, currentIdx, total }
   isConveyorRunning: false,
+  conveyorSelectionTarget: 'conveyor', // 'general' or 'conveyor'
   conveyorDraft: {
       prompt: '',
+      resolution: '1K',
+      aspectRatio: '1:1',
       generalRefs: [], // Array of file paths or objects
       conveyorRefs: [] // Array of file paths or objects
   }
@@ -35,13 +38,23 @@ let OUTPUT_DIR = null; // Track this too
         await updatePaths();
         log(`System ready. Input: ${INPUT_DIR}`);
         
+        // Load settings
+        const settings = await ipcRenderer.invoke('get-settings');
+        if (settings.resolution) state.resolution = settings.resolution;
+        if (settings.aspectRatio) state.aspectRatio = settings.aspectRatio;
+        
         // Initial library load
         await loadProjectsLibrary(); // New
         await loadInputLibrary();
         await loadOutputLibrary();
         
+        updateStateUI(); // Update UI with loaded settings
+        
         // Init Conveyor UI
         updateConveyorStatusUI();
+        setupConveyorUI(); // New init function
+        setupAutoResize();
+        autoResizeTextarea(els.prompt); // Initial resize for main prompt
         
     } catch (e) {
         log(`Error initializing paths: ${e.message}`, 'error');
@@ -134,11 +147,20 @@ const els = {
   conveyorOverlay: document.getElementById('conveyor-overlay'),
   btnCloseConveyor: document.getElementById('btn-close-conveyor'),
   conveyorLibraryGrid: document.getElementById('conveyor-library-grid'),
+  
+  conveyorResGroup: document.getElementById('conveyor-resolution-group'),
+  conveyorRatioGroup: document.getElementById('conveyor-ratio-group'),
+  
   conveyorPromptInput: document.getElementById('conveyor-prompt-input'),
+  
+  groupGenRefs: document.getElementById('group-gen-refs'),
   conveyorGenRefList: document.getElementById('conveyor-gen-ref-list'),
   conveyorGenRefCount: document.getElementById('conveyor-gen-ref-count'),
+  
+  groupConvRefs: document.getElementById('group-conv-refs'),
   conveyorImgList: document.getElementById('conveyor-img-list'),
   conveyorImgCount: document.getElementById('conveyor-img-count'),
+  
   btnExecuteConveyor: document.getElementById('btn-execute-conveyor'),
 
   conveyorDetailsOverlay: document.getElementById('conveyor-details-overlay'),
@@ -806,17 +828,19 @@ function getFilePath(file) {
     return null;
 }
 
-els.resGroup.addEventListener('click', e => {
+els.resGroup.addEventListener('click', async e => {
   if (e.target.tagName === 'BUTTON') {
     state.resolution = e.target.dataset.value;
     updateStateUI();
+    await ipcRenderer.invoke('save-settings', { resolution: state.resolution, debugMode: els.debugCheckbox.checked });
   }
 });
 
-els.ratioGroup.addEventListener('click', e => {
+els.ratioGroup.addEventListener('click', async e => {
   if (e.target.tagName === 'BUTTON') {
     state.aspectRatio = e.target.dataset.value;
     updateStateUI();
+    await ipcRenderer.invoke('save-settings', { aspectRatio: state.aspectRatio, debugMode: els.debugCheckbox.checked });
   }
 });
 
@@ -1097,12 +1121,88 @@ document.getElementById('btn-close').addEventListener('click', () => {
 
 // --- Conveyor Logic ---
 
+function setupConveyorUI() {
+    // Selection Groups
+    els.groupGenRefs.addEventListener('click', () => setConveyorSelectionTarget('general'));
+    els.groupConvRefs.addEventListener('click', () => setConveyorSelectionTarget('conveyor'));
+
+    // Resolution & Ratio
+    els.conveyorResGroup.addEventListener('click', async e => {
+        if (e.target.tagName === 'BUTTON') {
+            state.conveyorDraft.resolution = e.target.dataset.value;
+            // Also update global state and save? Spec says "save... in config.json". 
+            // It makes sense to sync them or at least save the preference.
+            // Let's update global state too for consistency across the app.
+            state.resolution = state.conveyorDraft.resolution;
+            updateStateUI(); 
+            updateConveyorSettingsUI();
+            await ipcRenderer.invoke('save-settings', { resolution: state.resolution, debugMode: els.debugCheckbox.checked });
+        }
+    });
+
+    els.conveyorRatioGroup.addEventListener('click', async e => {
+        if (e.target.tagName === 'BUTTON') {
+            state.conveyorDraft.aspectRatio = e.target.dataset.value;
+            state.aspectRatio = state.conveyorDraft.aspectRatio;
+            updateStateUI();
+            updateConveyorSettingsUI();
+            await ipcRenderer.invoke('save-settings', { aspectRatio: state.aspectRatio, debugMode: els.debugCheckbox.checked });
+        }
+    });
+}
+
+function setConveyorSelectionTarget(target) {
+    state.conveyorSelectionTarget = target;
+    
+    // UI Update
+    if (target === 'general') {
+        els.groupGenRefs.classList.add('group-active');
+        els.groupConvRefs.classList.remove('group-active');
+    } else {
+        els.groupGenRefs.classList.remove('group-active');
+        els.groupConvRefs.classList.add('group-active');
+    }
+}
+
+function updateConveyorSettingsUI() {
+    Array.from(els.conveyorResGroup.children).forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.value === state.conveyorDraft.resolution);
+    });
+    Array.from(els.conveyorRatioGroup.children).forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.value === state.conveyorDraft.aspectRatio);
+    });
+}
+
+function autoResizeTextarea(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+}
+
+function setupAutoResize() {
+    [els.prompt, els.conveyorPromptInput].forEach(textarea => {
+        textarea.addEventListener('input', () => autoResizeTextarea(textarea));
+    });
+}
+
 // 1. Creation Modal
 els.btnAddConveyor.addEventListener('click', async () => {
     // Reset draft
-    state.conveyorDraft = { prompt: '', generalRefs: [], conveyorRefs: [] };
+    state.conveyorDraft = { 
+        prompt: '', 
+        resolution: state.resolution, // Use current global state
+        aspectRatio: state.aspectRatio, // Use current global state
+        generalRefs: [], 
+        conveyorRefs: [] 
+    };
     els.conveyorPromptInput.value = '';
+    
+    // Default selection
+    setConveyorSelectionTarget('conveyor');
+    updateConveyorSettingsUI();
     updateConveyorDraftUI();
+    
+    // Initial resize
+    autoResizeTextarea(els.conveyorPromptInput);
     
     await loadConveyorLibrary();
     els.conveyorOverlay.classList.remove('hidden');
@@ -1124,25 +1224,14 @@ async function loadConveyorLibrary() {
         allFiles.forEach(file => {
             const div = document.createElement('div');
             div.className = 'conveyor-lib-item';
+            div.title = "Click to add to selected list";
             
             const img = document.createElement('img');
             img.src = `file://${file.path}`;
             
-            // Zones
-            const zoneGen = document.createElement('div');
-            zoneGen.className = 'zone-general';
-            zoneGen.textContent = 'General';
-            zoneGen.addEventListener('click', () => addToConveyorDraft(file, 'general'));
-            
-            const zoneConv = document.createElement('div');
-            zoneConv.className = 'zone-conveyor';
-            zoneConv.textContent = 'Conveyor';
-            zoneConv.addEventListener('click', () => addToConveyorDraft(file, 'conveyor'));
+            div.addEventListener('click', () => addToConveyorDraft(file));
             
             div.appendChild(img);
-            div.appendChild(zoneGen);
-            div.appendChild(zoneConv);
-            
             els.conveyorLibraryGrid.appendChild(div);
         });
     } catch (e) {
@@ -1150,14 +1239,12 @@ async function loadConveyorLibrary() {
     }
 }
 
-function addToConveyorDraft(file, type) {
+function addToConveyorDraft(file) {
+    const type = state.conveyorSelectionTarget;
     if (type === 'general') {
         if (state.conveyorDraft.generalRefs.find(f => f.path === file.path)) return; // No dupes
         state.conveyorDraft.generalRefs.push(file);
     } else {
-        // Allow dupes in conveyor list? Usually yes, user might want to process same image twice? 
-        // Let's assume no dupes for now to be safe, or yes? "list of conveyor preview images" -> implies sequence.
-        // Let's allow dupes.
         state.conveyorDraft.conveyorRefs.push(file);
     }
     updateConveyorDraftUI();
@@ -1172,7 +1259,8 @@ function updateConveyorDraftUI() {
         img.src = `file://${file.path}`;
         img.className = 'mini-ref-thumb';
         img.title = 'Click to remove';
-        img.addEventListener('click', () => {
+        img.addEventListener('click', (e) => {
+            e.stopPropagation(); // prevent group selection if any
             state.conveyorDraft.generalRefs.splice(idx, 1);
             updateConveyorDraftUI();
         });
@@ -1187,7 +1275,8 @@ function updateConveyorDraftUI() {
         img.src = `file://${file.path}`;
         img.className = 'mini-ref-thumb';
         img.title = 'Click to remove';
-        img.addEventListener('click', () => {
+        img.addEventListener('click', (e) => {
+             e.stopPropagation(); // prevent group selection if any
             state.conveyorDraft.conveyorRefs.splice(idx, 1);
             updateConveyorDraftUI();
         });
@@ -1211,6 +1300,8 @@ els.btnExecuteConveyor.addEventListener('click', () => {
     const conveyor = {
         id: Date.now(),
         prompt: prompt,
+        resolution: state.conveyorDraft.resolution,
+        aspectRatio: state.conveyorDraft.aspectRatio,
         // Clone lists
         generalRefs: [...state.conveyorDraft.generalRefs],
         conveyorRefs: [...state.conveyorDraft.conveyorRefs],
@@ -1277,31 +1368,20 @@ async function processConveyorQueue() {
         
         // UI Update (Counter)
         updateConveyorStatusUI();
-
-        // 2. Execute Generation (Reuse existing IPC)
-        // Note: This does NOT add to the main "state.requests" list automatically unless we want it to.
-        // The prompt says "generated images should be saved in same way as old method... with injected metadata".
-        // The IPC 'generate-image' does exactly that.
-        // If we want it to show up in the main UI's request list, we should add it there too.
-        
-        // Let's add it to main request list for visibility? 
-        // "conveyor does not interact with basic UI elements... it works under the hood". 
-        // Maybe we shouldn't clutter the main request list.
-        // But "live counter... generated images should be saved...".
-        // I will just call IPC.
         
         try {
             log(`Conveyor ${conv.id}: generating ${conv.currentIdx + 1}/${conv.total}...`);
             const result = await ipcRenderer.invoke('generate-image', {
                 prompt: conv.prompt,
-                resolution: '1K', // Default?
-                ratio: '1:1', // Default?
+                resolution: conv.resolution || '1K',
+                ratio: conv.aspectRatio || '1:1',
                 referenceImages: finalRefs,
                 project: state.activeProject ? state.activeProject.title : null
             });
 
             if (result.success) {
                 log(`Conveyor item finished: ${path.basename(result.path)}`, 'success');
+                loadOutputLibrary(); // Refresh library after each success
             } else {
                 log(`Conveyor item failed: ${result.error}`, 'error');
             }
@@ -1316,18 +1396,6 @@ async function processConveyorQueue() {
     // Done with this conveyor
     state.conveyorQueue.shift(); // Remove head
     processConveyorQueue(); // Process next
-}
-
-// 3. Status UI & Overlays
-function updateConveyorStatusUI() {
-    if (!state.activeConveyor) {
-        els.conveyorStatusBox.classList.add('hidden');
-        return;
-    }
-
-    els.conveyorStatusBox.classList.remove('hidden');
-    els.conveyorPromptPreview.textContent = state.activeConveyor.prompt;
-    els.conveyorCounter.textContent = `${state.activeConveyor.currentIdx}/${state.activeConveyor.total}`;
 }
 
 els.btnStopConveyor.addEventListener('click', () => {

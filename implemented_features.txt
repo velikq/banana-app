@@ -77,3 +77,12 @@ new feature - conveyor generation:
 3.4. box with previews of conveyor images
 3.5. "Execute" button. it will close overlay and add new conveyor to queue if any conveyor is running or will start executing it now
 4. generated images should be saved in same way as old method - in output folder of project with injected metadata (promp and list of reference images (simplified used general and conveyor images))
+
+in conveyor generation overlay make library of inputs and outputs fit 5x5 grid of images (they have a same size of images in box of preview images on main ui) with a scroll bar to see other images
+1. in conveyor generation overlay remove click zones from library of images. instead allow clicking on "general references" or "conveyor images" to select where image will be used. 
+2. in the end of generation and saving an image from conveyor generation update output library
+3. add to conveyor generation overlay aspect ratio and resolution parameters with same ui as main window
+in the end of generation of each individual image (not on the end of conveyor execution) and saving it to outputs make an update of output library
+save selected resolution and aspect ratio in config.json. select it when app is open and when conveyor overlay is open
+make size of conveyor overlay dynamic and use 80% of screen.
+make text input for prompt dinamically enlarge to fit whole prompt without scrolling inside box for both main ui and conveyor ui

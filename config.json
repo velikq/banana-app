@@ -1,3 +1,5 @@
 {
-  "debugMode": false
+  "debugMode": false,
+  "resolution": "2K",
+  "aspectRatio": "3:4"
 }

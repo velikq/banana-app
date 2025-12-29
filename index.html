@@ -228,18 +228,43 @@
 
         <!-- Right: Controls -->
         <div class="conveyor-controls-section">
+            <!-- Resolution -->
+            <div class="control-group">
+                <div class="group-header">
+                <span class="icon">⛶</span>
+                <span>Resolution</span>
+                </div>
+                <div class="button-group" id="conveyor-resolution-group">
+                <button class="option-btn active" data-value="1K">1K</button>
+                <button class="option-btn" data-value="2K">2K</button>
+                <button class="option-btn" data-value="4K">4K</button>
+                </div>
+            </div>
+
+            <!-- Aspect Ratio -->
+            <div class="control-group">
+                <div class="group-header">Aspect Ratio</div>
+                <div class="button-group" id="conveyor-ratio-group">
+                <button class="option-btn active" data-value="1:1">1:1</button>
+                <button class="option-btn" data-value="3:4">3:4</button>
+                <button class="option-btn" data-value="4:3">4:3</button>
+                <button class="option-btn" data-value="9:16">9:16</button>
+                <button class="option-btn" data-value="16:9">16:9</button>
+                </div>
+            </div>
+
             <div class="control-group">
                 <label>General Prompt</label>
                 <textarea id="conveyor-prompt-input" placeholder="Enter general prompt..."></textarea>
             </div>
             
-            <div class="control-group">
-                <label>General References <span id="conveyor-gen-ref-count">(0)</span></label>
+            <div class="control-group selectable-group" id="group-gen-refs">
+                <label class="selection-label">General References <span id="conveyor-gen-ref-count">(0)</span></label>
                 <div id="conveyor-gen-ref-list" class="mini-ref-list"></div>
             </div>
 
-            <div class="control-group">
-                <label>Conveyor Images <span id="conveyor-img-count">(0)</span></label>
+            <div class="control-group selectable-group" id="group-conv-refs">
+                <label class="selection-label">Conveyor Images <span id="conveyor-img-count">(0)</span></label>
                 <div id="conveyor-img-list" class="mini-ref-list"></div>
             </div>
 

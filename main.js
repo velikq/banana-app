@@ -99,12 +99,19 @@ const logger = {
 };
 
 ipcMain.handle('get-settings', () => {
-    return { debugMode: appConfig.debugMode };
+    return { 
+        debugMode: appConfig.debugMode,
+        resolution: appConfig.resolution,
+        aspectRatio: appConfig.aspectRatio
+    };
 });
 
-ipcMain.handle('save-settings', async (event, { apiKey, debugMode }) => {
-    // Save debug mode
+ipcMain.handle('save-settings', async (event, { apiKey, debugMode, resolution, aspectRatio }) => {
+    // Save settings
     appConfig.debugMode = debugMode;
+    if (resolution) appConfig.resolution = resolution;
+    if (aspectRatio) appConfig.aspectRatio = aspectRatio;
+    
     saveConfig(appConfig);
 
     // Save API key if provided
