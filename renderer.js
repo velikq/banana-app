@@ -1121,32 +1121,37 @@ document.getElementById('btn-close').addEventListener('click', () => {
 
 // --- Conveyor Logic ---
 
+function updateConveyorStatusUI() {
+    if (state.activeConveyor) {
+        els.conveyorStatusBox.classList.remove('hidden');
+        els.conveyorPromptPreview.textContent = state.activeConveyor.prompt || '(No prompt)';
+        els.conveyorCounter.textContent = `${state.activeConveyor.currentIdx} / ${state.activeConveyor.total}`;
+    } else {
+        els.conveyorStatusBox.classList.add('hidden');
+    }
+}
+
 function setupConveyorUI() {
     // Selection Groups
-    els.groupGenRefs.addEventListener('click', () => setConveyorSelectionTarget('general'));
-    els.groupConvRefs.addEventListener('click', () => setConveyorSelectionTarget('conveyor'));
+    if (els.groupGenRefs) {
+        els.groupGenRefs.addEventListener('click', () => setConveyorSelectionTarget('general'));
+    }
+    if (els.groupConvRefs) {
+        els.groupConvRefs.addEventListener('click', () => setConveyorSelectionTarget('conveyor'));
+    }
 
     // Resolution & Ratio
-    els.conveyorResGroup.addEventListener('click', async e => {
+    els.conveyorResGroup.addEventListener('click', e => {
         if (e.target.tagName === 'BUTTON') {
             state.conveyorDraft.resolution = e.target.dataset.value;
-            // Also update global state and save? Spec says "save... in config.json". 
-            // It makes sense to sync them or at least save the preference.
-            // Let's update global state too for consistency across the app.
-            state.resolution = state.conveyorDraft.resolution;
-            updateStateUI(); 
             updateConveyorSettingsUI();
-            await ipcRenderer.invoke('save-settings', { resolution: state.resolution, debugMode: els.debugCheckbox.checked });
         }
     });
 
-    els.conveyorRatioGroup.addEventListener('click', async e => {
+    els.conveyorRatioGroup.addEventListener('click', e => {
         if (e.target.tagName === 'BUTTON') {
             state.conveyorDraft.aspectRatio = e.target.dataset.value;
-            state.aspectRatio = state.conveyorDraft.aspectRatio;
-            updateStateUI();
             updateConveyorSettingsUI();
-            await ipcRenderer.invoke('save-settings', { aspectRatio: state.aspectRatio, debugMode: els.debugCheckbox.checked });
         }
     });
 }
