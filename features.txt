@@ -1,0 +1,1 @@
+rewrite code to work primarily with PNG files (all new generations saved as PNG files) with option to load JPEG files when querying generation (load jpegs as references)

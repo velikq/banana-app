@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { GoogleGenAI } = require('@google/genai');
@@ -326,6 +326,19 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
 
     logger.log(`Image received. Size: ${finalBuffer.length}, Mime: ${finalMime}`);
 
+    // --- Convert to PNG if not already ---
+    if (finalMime !== 'image/png') {
+        logger.log(`Converting ${finalMime} to image/png...`);
+        try {
+            const img = nativeImage.createFromBuffer(finalBuffer);
+            finalBuffer = img.toPNG();
+            finalMime = 'image/png';
+        } catch (convErr) {
+            logger.error('Conversion to PNG failed:', convErr);
+            // If conversion fails, we'll try to save with original format but metadata injection might be skipped if not PNG/JPEG
+        }
+    }
+
     // --- Inject Metadata ---
     // Data to save
     // We only save minimal info: prompt, resolution, ratio, and reference hashes
@@ -343,11 +356,15 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
     const safeMetaString = Buffer.from(metaString).toString('base64');
 
     let savedBuffer = finalBuffer;
-    const ext = mime.getExtension(finalMime);
+    const ext = 'png'; // Always png now
 
     try {
-        if (finalMime === 'image/jpeg') {
-            logger.log('Injecting JPEG metadata...');
+        if (finalMime === 'image/png') {
+            logger.log('Injecting PNG metadata...');
+            savedBuffer = injectPngMetadata(finalBuffer, 'BananaAppMeta', safeMetaString);
+        } else if (finalMime === 'image/jpeg') {
+            // Fallback for JPEG if conversion failed but it was JPEG
+            logger.log('Injecting JPEG metadata (fallback)...');
             const exifObj = {
                 "Exif": {
                     [piexif.ExifIFD.UserComment]: "BananaAppMeta:" + safeMetaString
@@ -356,9 +373,6 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
             const exifBytes = piexif.dump(exifObj);
             const newData = piexif.insert(exifBytes, finalBuffer.toString('binary'));
             savedBuffer = Buffer.from(newData, 'binary');
-        } else if (finalMime === 'image/png') {
-            logger.log('Injecting PNG metadata...');
-            savedBuffer = injectPngMetadata(finalBuffer, 'BananaAppMeta', safeMetaString);
         }
     } catch (metaErr) {
         logger.error('Metadata injection failed, saving raw image:', metaErr);
