@@ -9,9 +9,13 @@ const piexif = require('piexifjs');
 let state = {
   resolution: '1K',
   aspectRatio: '1:1',
+  imageProvider: 'ai_studio_nano_banana_pro',
+  /** When set, metadata used this model but user kept a different current model */
+  contextSourceProviderId: null,
+  availableProviders: [],
   prompt: '',
   references: [], // { hash, mimeType, data (base64) }
-  requests: [], // { id, status, prompt, resolution, ratio, references, timestamp, resultPath, error }
+  requests: [], // { id, status, prompt, resolution, ratio, references, timestamp, resultPath, error, kieTaskId? }
   currentRequestId: null,
   activeProject: null, // { title, imageName, imagePath }
   
@@ -42,14 +46,17 @@ let OUTPUT_DIR = null; // Track this too
         const settings = await ipcRenderer.invoke('get-settings');
         if (settings.resolution) state.resolution = settings.resolution;
         if (settings.aspectRatio) state.aspectRatio = settings.aspectRatio;
+        if (settings.imageProvider) state.imageProvider = settings.imageProvider;
+        state.availableProviders = settings.availableProviders || [];
         
         // Initial library load
         await loadProjectsLibrary(); // New
         await loadInputLibrary();
         await loadOutputLibrary();
         
-        updateStateUI(); // Update UI with loaded settings
-        
+        populateMainModelSelect();
+        updateStateUI();
+
         // Init Conveyor UI
         updateConveyorStatusUI();
         setupConveyorUI(); // New init function
@@ -102,7 +109,11 @@ const els = {
   resultImage: document.getElementById('result-image'),
   spinner: document.getElementById('loading-spinner'),
   tag: document.getElementById('preview-tag'),
-  
+  mainProviderSelect: document.getElementById('main-provider-select'),
+  contextModelMismatch: document.getElementById('context-model-mismatch'),
+  contextModelUsedLabel: document.getElementById('context-model-used-label'),
+  btnSwitchContextModel: document.getElementById('btn-switch-context-model'),
+
   resetBtn: document.getElementById('reset-btn'),
 
   // Libraries
@@ -122,7 +133,15 @@ const els = {
   btnSettings: document.getElementById('btn-settings'),
   btnCloseSettings: document.getElementById('btn-close-settings'),
   btnSaveSettings: document.getElementById('btn-save-settings'),
+  settingsTabKeys: document.getElementById('settings-tab-keys'),
+  settingsTabLimits: document.getElementById('settings-tab-limits'),
+  settingsTabApp: document.getElementById('settings-tab-app'),
+  settingsPanelKeys: document.getElementById('settings-panel-keys'),
+  settingsPanelLimits: document.getElementById('settings-panel-limits'),
+  settingsPanelApp: document.getElementById('settings-panel-app'),
+  vendorLimitsContainer: document.getElementById('vendor-limits-container'),
   apiKeyInput: document.getElementById('api-key-input'),
+  kieApiKeyInput: document.getElementById('kie-api-key-input'),
   debugCheckbox: document.getElementById('debug-mode-checkbox'),
 
   // Project Overlay
@@ -171,6 +190,109 @@ const els = {
   conveyorQueueOverlay: document.getElementById('conveyor-queue-overlay'),
   conveyorQueueList: document.getElementById('conveyor-queue-list')
 };
+
+const KEY_PLACEHOLDER_MASK = '**********';
+
+const VENDOR_LABELS = {
+  kie_ai: 'Kie.ai',
+  ai_studio: 'Google AI Studio'
+};
+
+let syncingMainModelSelect = false;
+
+function showSettingsTab(tabId) {
+  const tabs = [
+    { id: 'keys', tab: els.settingsTabKeys, panel: els.settingsPanelKeys },
+    { id: 'limits', tab: els.settingsTabLimits, panel: els.settingsPanelLimits },
+    { id: 'app', tab: els.settingsTabApp, panel: els.settingsPanelApp }
+  ];
+  for (const { id, tab, panel } of tabs) {
+    if (!tab || !panel) continue;
+    const on = id === tabId;
+    tab.classList.toggle('active', on);
+    panel.classList.toggle('hidden', !on);
+  }
+}
+
+function appendVendorLimitField(section, vendor, field, label, value) {
+  const wrap = document.createElement('div');
+  wrap.className = 'setting-item';
+  const lab = document.createElement('label');
+  lab.htmlFor = `lim-${vendor}-${field}`;
+  lab.textContent = label;
+  const inp = document.createElement('input');
+  inp.type = 'number';
+  inp.id = `lim-${vendor}-${field}`;
+  inp.dataset.vendor = vendor;
+  inp.dataset.limitField = field;
+  inp.value = String(value);
+  wrap.appendChild(lab);
+  wrap.appendChild(inp);
+  section.appendChild(wrap);
+}
+
+function renderVendorLimitsPanel(limits) {
+  if (!els.vendorLimitsContainer) return;
+  els.vendorLimitsContainer.innerHTML = '';
+  const vendors = Object.keys(limits || {}).sort();
+  for (const vendor of vendors) {
+    const row = limits[vendor];
+    if (!row) continue;
+    const section = document.createElement('div');
+    section.className = 'vendor-limit-section';
+    const h = document.createElement('h4');
+    h.textContent = VENDOR_LABELS[vendor] || vendor;
+    section.appendChild(h);
+    appendVendorLimitField(section, vendor, 'maxConcurrent', 'Max concurrent jobs', row.maxConcurrent);
+    appendVendorLimitField(
+      section,
+      vendor,
+      'maxStartsPerWindow',
+      'Max job starts per window',
+      row.maxStartsPerWindow
+    );
+    const windowSec = Math.round((row.windowMs || 10000) / 1000);
+    appendVendorLimitField(section, vendor, 'windowSec', 'Window (seconds)', windowSec);
+    appendVendorLimitField(
+      section,
+      vendor,
+      'pollIntervalMs',
+      'Poll interval (ms)',
+      row.pollIntervalMs
+    );
+    const pollHint = document.createElement('p');
+    pollHint.className = 'settings-hint';
+    pollHint.style.marginTop = '8px';
+    pollHint.textContent =
+      vendor === 'kie_ai'
+        ? 'Poll interval applies to Kie task status checks.'
+        : 'Poll interval reserved for future async use with this vendor.';
+    section.appendChild(pollHint);
+    els.vendorLimitsContainer.appendChild(section);
+  }
+}
+
+function collectVendorJobLimitsFromForm() {
+  const out = {};
+  if (!els.vendorLimitsContainer) return out;
+  const inputs = els.vendorLimitsContainer.querySelectorAll('input[data-vendor][data-limit-field]');
+  inputs.forEach((inp) => {
+    const v = inp.dataset.vendor;
+    const f = inp.dataset.limitField;
+    if (!v || !f) return;
+    if (!out[v]) out[v] = {};
+    const n = Number(inp.value);
+    out[v][f] = Number.isFinite(n) ? n : 0;
+  });
+  for (const v of Object.keys(out)) {
+    const r = out[v];
+    if (r.windowSec != null) {
+      r.windowMs = Math.max(1000, Math.round(r.windowSec * 1000));
+      delete r.windowSec;
+    }
+  }
+  return out;
+}
 
 // --- Projects Logic ---
 let newProjectSelectedImage = null; // path
@@ -374,11 +496,92 @@ function updateHoverPreviewPos(element) {
     els.hoverPreview.style.top = `${y}px`;
 }
 
+function getProviderDisplayLabel(providerId) {
+  if (!providerId) return '—';
+  const p = state.availableProviders.find((x) => x.id === providerId);
+  return p ? p.label : providerId;
+}
+
+function getProviderList() {
+  return state.availableProviders.length
+    ? state.availableProviders
+    : [
+        { id: 'ai_studio_nano_banana_pro', label: 'AI Studio — Nano Banana Pro' },
+        { id: 'kie_nano_banana_pro', label: 'Kie.ai — Nano Banana Pro' }
+      ];
+}
+
+function updateModelDisplayUICore() {
+  if (els.contextModelMismatch && els.contextModelUsedLabel) {
+    const show =
+      Boolean(state.contextSourceProviderId) &&
+      state.contextSourceProviderId !== state.imageProvider;
+    els.contextModelMismatch.classList.toggle('hidden', !show);
+    if (show) {
+      els.contextModelUsedLabel.textContent = `Loaded context used: ${getProviderDisplayLabel(
+        state.contextSourceProviderId
+      )}`;
+    }
+  }
+}
+
+function populateMainModelSelect() {
+  if (!els.mainProviderSelect) return;
+  const list = getProviderList();
+  els.mainProviderSelect.innerHTML = '';
+  for (const p of list) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.label;
+    els.mainProviderSelect.appendChild(opt);
+  }
+  const valid = list.some((p) => p.id === state.imageProvider);
+  const nextVal = valid ? state.imageProvider : list[0].id;
+  if (!valid) state.imageProvider = nextVal;
+  syncingMainModelSelect = true;
+  els.mainProviderSelect.value = nextVal;
+  syncingMainModelSelect = false;
+  if (state.contextSourceProviderId === state.imageProvider) {
+    state.contextSourceProviderId = null;
+  }
+  updateModelDisplayUICore();
+}
+
+function updateModelDisplayUI() {
+  if (els.mainProviderSelect && !syncingMainModelSelect) {
+    const list = getProviderList();
+    let want = state.imageProvider;
+    if (!list.some((p) => p.id === want)) want = list[0].id;
+    const opts = [...els.mainProviderSelect.options];
+    const domOk = opts.length > 0 && opts.some((o) => o.value === want);
+    if (!domOk) {
+      populateMainModelSelect();
+      return;
+    }
+    if (want !== state.imageProvider) state.imageProvider = want;
+    if (els.mainProviderSelect.value !== want) {
+      syncingMainModelSelect = true;
+      els.mainProviderSelect.value = want;
+      syncingMainModelSelect = false;
+    }
+  }
+  updateModelDisplayUICore();
+}
+
 // --- Settings Logic ---
 async function openSettings() {
     const settings = await ipcRenderer.invoke('get-settings');
     els.debugCheckbox.checked = settings.debugMode;
-    els.apiKeyInput.value = ''; // Always empty as per requirement
+    if (settings.availableProviders) state.availableProviders = settings.availableProviders;
+    populateMainModelSelect();
+    els.apiKeyInput.value = '';
+    els.apiKeyInput.placeholder = settings.hasGeminiApiKey ? KEY_PLACEHOLDER_MASK : '';
+    if (els.kieApiKeyInput) {
+      els.kieApiKeyInput.value = '';
+      els.kieApiKeyInput.placeholder = settings.hasKieApiKey ? KEY_PLACEHOLDER_MASK : '';
+    }
+    renderVendorLimitsPanel(settings.vendorJobLimits || {});
+    showSettingsTab('keys');
     els.settingsOverlay.classList.remove('hidden');
 }
 
@@ -388,10 +591,23 @@ function closeSettings() {
 
 async function saveSettings() {
     const apiKey = els.apiKeyInput.value;
+    const kieApiKey = els.kieApiKeyInput ? els.kieApiKeyInput.value : '';
     const debugMode = els.debugCheckbox.checked;
-    
-    const result = await ipcRenderer.invoke('save-settings', { apiKey, debugMode });
+    const imageProvider = state.imageProvider;
+    const vendorJobLimits = collectVendorJobLimitsFromForm();
+
+    const result = await ipcRenderer.invoke('save-settings', {
+      apiKey,
+      kieApiKey,
+      debugMode,
+      imageProvider,
+      vendorJobLimits
+    });
     if (result.success) {
+        if (state.contextSourceProviderId === state.imageProvider) {
+            state.contextSourceProviderId = null;
+        }
+        updateModelDisplayUI();
         log('Settings saved.', 'success');
         closeSettings();
     } else {
@@ -402,6 +618,48 @@ async function saveSettings() {
 els.btnSettings.addEventListener('click', openSettings);
 els.btnCloseSettings.addEventListener('click', closeSettings);
 els.btnSaveSettings.addEventListener('click', saveSettings);
+
+if (els.settingsTabKeys) els.settingsTabKeys.addEventListener('click', () => showSettingsTab('keys'));
+if (els.settingsTabLimits) els.settingsTabLimits.addEventListener('click', () => showSettingsTab('limits'));
+if (els.settingsTabApp) els.settingsTabApp.addEventListener('click', () => showSettingsTab('app'));
+
+if (els.mainProviderSelect) {
+  els.mainProviderSelect.addEventListener('change', async () => {
+    if (syncingMainModelSelect) return;
+    const next = els.mainProviderSelect.value;
+    state.imageProvider = next;
+    if (next === state.contextSourceProviderId) state.contextSourceProviderId = null;
+    try {
+      await ipcRenderer.invoke('save-settings', {
+        imageProvider: next,
+        debugMode: els.debugCheckbox.checked
+      });
+    } catch (e) {
+      log(`Could not save model: ${e.message}`, 'warn');
+    }
+    updateModelDisplayUI();
+  });
+}
+
+if (els.btnSwitchContextModel) {
+  els.btnSwitchContextModel.addEventListener('click', async () => {
+    if (!state.contextSourceProviderId) return;
+    const next = state.contextSourceProviderId;
+    try {
+      await ipcRenderer.invoke('save-settings', {
+        imageProvider: next,
+        debugMode: els.debugCheckbox.checked
+      });
+      state.imageProvider = next;
+      state.contextSourceProviderId = null;
+      populateMainModelSelect();
+      updateStateUI();
+      log(`Switched model to ${getProviderDisplayLabel(next)}`, 'success');
+    } catch (e) {
+      log(`Failed to switch model: ${e.message}`, 'error');
+    }
+  });
+}
 
 // --- Logging ---
 function log(msg, type = 'info') {
@@ -416,6 +674,10 @@ function log(msg, type = 'info') {
       console.log(msg);
   }
 }
+
+ipcRenderer.on('request-log', (event, msg) => {
+  log(msg, 'info');
+});
 
 // --- UI Updates ---
 function updateStateUI() {
@@ -434,6 +696,8 @@ function updateStateUI() {
   // References
   els.refCount.textContent = `${state.references.length} / 9`;
   renderRefList();
+
+  updateModelDisplayUI();
 }
 
 function renderRefList() {
@@ -521,6 +785,46 @@ function renderRequestList() {
         
         item.appendChild(iconDiv);
         item.appendChild(infoDiv);
+
+        if (req.status === 'error' && req.kieTaskId && req.provider === 'kie_nano_banana_pro') {
+          const retryBtn = document.createElement('button');
+          retryBtn.type = 'button';
+          retryBtn.className = 'request-retry-btn';
+          retryBtn.textContent = '🔄';
+          retryBtn.title = 'Check Kie task once';
+          retryBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const res = await ipcRenderer.invoke('kie-recover-task', {
+              taskId: req.kieTaskId,
+              prompt: req.prompt,
+              resolution: req.resolution,
+              ratio: req.ratio,
+              referenceImages: req.references.map((r) => ({
+                hash: r.hash,
+                mimeType: r.mimeType,
+                extension: r.extension
+              })),
+              project: state.activeProject ? state.activeProject.title : null
+            });
+            if (res.success) {
+              req.status = 'success';
+              req.resultPath = res.path;
+              req.kieTaskId = null;
+              req.error = null;
+              log(`Request ${req.id} completed (retry).`, 'success');
+              loadOutputLibrary();
+            } else if (res.stillPending) {
+              log(`Request ${req.id}: Kie task still processing.`, 'info');
+            } else if (res.error) {
+              log(`Request ${req.id} retry: ${res.error}`, 'error');
+            }
+            renderRequestList();
+            if (state.currentRequestId === req.id) {
+              updateMainView(req);
+            }
+          });
+          item.appendChild(retryBtn);
+        }
         
         item.addEventListener('click', () => selectRequest(req.id));
         
@@ -802,7 +1106,8 @@ els.resetBtn.addEventListener('click', () => {
     state.aspectRatio = '1:1';
     state.references = [];
     state.prompt = '';
-    
+    state.contextSourceProviderId = null;
+
     // We do not clear the request list, just the context form
     state.currentRequestId = null;
     
@@ -832,7 +1137,7 @@ els.resGroup.addEventListener('click', async e => {
   if (e.target.tagName === 'BUTTON') {
     state.resolution = e.target.dataset.value;
     updateStateUI();
-    await ipcRenderer.invoke('save-settings', { resolution: state.resolution, debugMode: els.debugCheckbox.checked });
+    await ipcRenderer.invoke('save-settings', { resolution: state.resolution, debugMode: els.debugCheckbox.checked, imageProvider: state.imageProvider });
   }
 });
 
@@ -840,7 +1145,7 @@ els.ratioGroup.addEventListener('click', async e => {
   if (e.target.tagName === 'BUTTON') {
     state.aspectRatio = e.target.dataset.value;
     updateStateUI();
-    await ipcRenderer.invoke('save-settings', { aspectRatio: state.aspectRatio, debugMode: els.debugCheckbox.checked });
+    await ipcRenderer.invoke('save-settings', { aspectRatio: state.aspectRatio, debugMode: els.debugCheckbox.checked, imageProvider: state.imageProvider });
   }
 });
 
@@ -927,12 +1232,10 @@ els.restoreDrop.addEventListener('drop', async e => {
   if (file) {
       const filePath = getFilePath(file);
       if (filePath) await restoreContext(filePath);
-      else log('Could not determine path for restored file.', 'error');
   }
 });
 
 async function restoreContext(filePath) {
-  log(`Restoring context from ${path.basename(filePath)}...`);
   try {
     const buffer = fs.readFileSync(filePath);
     let metadataStr = null;
@@ -959,6 +1262,24 @@ async function restoreContext(filePath) {
       
       state.resolution = data.resolution || '1K';
       state.aspectRatio = data.ratio || '1:1';
+
+      let restoredProvider = data.provider;
+      if (!restoredProvider || restoredProvider === 'gemini') {
+          restoredProvider = 'ai_studio_nano_banana_pro';
+      }
+      const list = getProviderList();
+      const providerKnown = list.some((p) => p.id === restoredProvider);
+
+      if (providerKnown && restoredProvider !== state.imageProvider) {
+        state.contextSourceProviderId = restoredProvider;
+      } else if (providerKnown) {
+        state.imageProvider = restoredProvider;
+        state.contextSourceProviderId = null;
+        populateMainModelSelect();
+      } else {
+        state.contextSourceProviderId = null;
+      }
+
       state.prompt = data.prompt || '';
       els.prompt.value = state.prompt;
       
@@ -979,21 +1300,15 @@ async function restoreContext(filePath) {
                       data: refBuffer.toString('base64'),
                       extension: ext
                   });
-              } else {
-                  log(`Reference not found: ${ref.hash}`, 'warn');
               }
           }
       }
       
       updateStateUI();
       els.charCounter.textContent = els.prompt.value.length;
-      
-      log('Context restored successfully!', 'success');
-    } else {
-      log('No compatible metadata found.', 'error');
     }
-  } catch (err) {
-    log(`Restore failed: ${err.message}`, 'error');
+  } catch {
+    /* silent */
   }
 }
 
@@ -1040,11 +1355,13 @@ els.generateBtn.addEventListener('click', () => {
       prompt: state.prompt,
       resolution: state.resolution,
       ratio: state.aspectRatio,
+      provider: state.imageProvider,
       // Deep copy refs
       references: JSON.parse(JSON.stringify(state.references)),
       timestamp: new Date(),
       resultPath: null,
-      error: null
+      error: null,
+      kieTaskId: null
   };
 
   // Add to start of list
@@ -1063,7 +1380,8 @@ els.generateBtn.addEventListener('click', () => {
     resolution: reqObj.resolution,
     ratio: reqObj.ratio,
     referenceImages: reqObj.references.map(r => ({ hash: r.hash, mimeType: r.mimeType, extension: r.extension })),
-    project: state.activeProject ? state.activeProject.title : null
+    project: state.activeProject ? state.activeProject.title : null,
+    provider: reqObj.provider
   };
 
   // Call IPC without await blocking the function
@@ -1080,6 +1398,7 @@ els.generateBtn.addEventListener('click', () => {
         } else {
             r.status = 'error';
             r.error = result.error;
+            r.kieTaskId = result.kieTaskId || null;
             log(`Request ${reqId} failed: ${result.error}`, 'error');
         }
         
@@ -1381,7 +1700,8 @@ async function processConveyorQueue() {
                 resolution: conv.resolution || '1K',
                 ratio: conv.aspectRatio || '1:1',
                 referenceImages: finalRefs,
-                project: state.activeProject ? state.activeProject.title : null
+                project: state.activeProject ? state.activeProject.title : null,
+                provider: state.imageProvider
             });
 
             if (result.success) {

@@ -21,19 +21,36 @@
 
   <!-- Settings Overlay -->
   <div id="settings-overlay" class="overlay hidden">
-    <div class="overlay-content">
+    <div class="overlay-content settings-overlay-wide">
       <div class="overlay-header">
         <h3>Settings</h3>
         <button id="btn-close-settings" class="close-overlay-btn">✕</button>
       </div>
-      <div class="overlay-body">
-        <div class="setting-item">
-          <label for="api-key-input">New Gemini API Key:</label>
-          <input type="password" id="api-key-input" placeholder="Enter new API key (leave empty to keep current)">
+      <div class="settings-tab-strip">
+        <button type="button" id="settings-tab-keys" class="settings-tab active">API keys</button>
+        <button type="button" id="settings-tab-limits" class="settings-tab">Request limits</button>
+        <button type="button" id="settings-tab-app" class="settings-tab">App</button>
+      </div>
+      <div class="overlay-body settings-overlay-body">
+        <div id="settings-panel-keys" class="settings-panel">
+          <div class="setting-item">
+            <label for="api-key-input">Google AI Studio API key (GEMINI_API_KEY):</label>
+            <input type="password" id="api-key-input" autocomplete="off">
+          </div>
+          <div class="setting-item">
+            <label for="kie-api-key-input">Kie.ai API key (KIE_AI_API_KEY):</label>
+            <input type="password" id="kie-api-key-input" autocomplete="off">
+          </div>
         </div>
-        <div class="setting-item checkbox-item">
-          <input type="checkbox" id="debug-mode-checkbox">
-          <label for="debug-mode-checkbox">Debug Mode</label>
+        <div id="settings-panel-limits" class="settings-panel hidden">
+          <p class="settings-hint">Per vendor: concurrency, rate window, and poll interval (used by async providers such as Kie).</p>
+          <div id="vendor-limits-container"></div>
+        </div>
+        <div id="settings-panel-app" class="settings-panel hidden">
+          <div class="setting-item checkbox-item">
+            <input type="checkbox" id="debug-mode-checkbox">
+            <label for="debug-mode-checkbox">Debug Mode</label>
+          </div>
         </div>
         <button id="btn-save-settings" class="primary-btn">Save Settings</button>
       </div>
@@ -143,6 +160,10 @@
       <div class="control-group prompt-group">
         <textarea id="prompt-input" placeholder="Describe your imagination..."></textarea>
         <div class="char-count"><span id="char-counter">0</span> chars</div>
+        <div id="context-model-mismatch" class="context-model-mismatch hidden">
+          <span id="context-model-used-label" class="context-model-used-label"></span>
+          <button type="button" id="btn-switch-context-model" class="secondary-btn context-switch-btn">Switch to that model</button>
+        </div>
       </div>
 
       <!-- Restore Context -->
@@ -168,6 +189,10 @@
 
     <!-- Main Content -->
     <div class="main-content">
+      <div id="result-model-bar" class="result-model-bar">
+        <label class="result-model-bar-label" for="main-provider-select">Current model</label>
+        <select id="main-provider-select" class="main-model-select" aria-label="Current model"></select>
+      </div>
       <div class="preview-area">
         <div class="info-tag hidden" id="preview-tag">1K • 1:1</div>
         

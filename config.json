@@ -1,5 +1,6 @@
 {
   "debugMode": false,
   "resolution": "2K",
-  "aspectRatio": "3:4"
+  "aspectRatio": "3:4",
+  "imageProvider": "kie_nano_banana_pro"
 }

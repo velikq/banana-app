@@ -1,10 +1,36 @@
 const { app, BrowserWindow, ipcMain, shell, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { GoogleGenAI } = require('@google/genai');
-const mime = require('mime').default;
 const piexif = require('piexifjs');
+const {
+  getProvider,
+  listProviders,
+  listUniqueVendors,
+  isValidProviderId,
+  DEFAULT_ID,
+  normalizeProviderId
+} = require('./providers/registry');
+const { finalizeAndSaveImage } = require('./lib/imagePipeline');
+const { KieUploadCacheSqlite } = require('./lib/kieUploadCacheSqlite');
+const { withVendorJobGate } = require('./lib/vendorJobGate');
+const {
+  mergeVendorJobLimits,
+  clampVendorLimitEntry,
+  validateVendorJobLimitsPayload,
+  FALLBACK_DEFAULT
+} = require('./lib/vendorLimitsDefaults');
+const kieProvider = require('./providers/kie_nano_banana_pro');
 require('dotenv').config();
+
+let kieUploadCacheSingleton = null;
+function getKieUploadCache() {
+  if (!kieUploadCacheSingleton) {
+    kieUploadCacheSingleton = new KieUploadCacheSqlite(
+      path.join(app.getPath('userData'), 'kie-upload-cache.sqlite')
+    );
+  }
+  return kieUploadCacheSingleton;
+}
 
 // Disable hardware acceleration to prevent GPU process crashes
 app.disableHardwareAcceleration();
@@ -13,63 +39,6 @@ app.commandLine.appendSwitch('use-angle', 'swiftshader');
 app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 app.commandLine.appendSwitch('disable-features', 'Autofill');
-
-app.commandLine.appendSwitch('proxy-server', `127.0.0.1:2080`);
-
-// --- utils for PNG Metadata ---
-const crcTable = [];
-for (let n = 0; n < 256; n++) {
-  let c = n;
-  for (let k = 0; k < 8; k++) {
-    if (c & 1) c = 0xedb88320 ^ (c >>> 1);
-    else c = c >>> 1;
-  }
-  crcTable[n] = c;
-}
-function crc32(buf) {
-  let crc = 0 ^ (-1);
-  for (let i = 0; i < buf.length; i++) {
-    crc = (crc >>> 8) ^ crcTable[(crc ^ buf[i]) & 0xff];
-  }
-  return (crc ^ (-1)) >>> 0;
-}
-
-function injectPngMetadata(buffer, key, value) {
-  // Create tEXt chunk
-  // Data format: Keyword + null separator + Text
-  const keyBuf = Buffer.from(key, 'latin1');
-  const valBuf = Buffer.from(value, 'latin1'); // standard tEXt is Latin-1. 
-  
-  const dataLen = keyBuf.length + 1 + valBuf.length;
-  const chunkLen = 4 + 4 + dataLen + 4; // Len + Type + Data + CRC
-  
-  const chunk = Buffer.alloc(chunkLen);
-  
-  // Length
-  chunk.writeUInt32BE(dataLen, 0);
-  // Type
-  chunk.write('tEXt', 4);
-  // Data
-  let offset = 8;
-  keyBuf.copy(chunk, offset);
-  offset += keyBuf.length;
-  chunk.writeUInt8(0, offset); // null separator
-  offset += 1;
-  valBuf.copy(chunk, offset);
-  
-  // CRC (calculated on Type + Data)
-  const crcVal = crc32(chunk.slice(4, 4 + 4 + dataLen));
-  chunk.writeUInt32BE(crcVal, 8 + dataLen);
-  
-  // Insert before IEND (last 12 bytes usually, but let's just find IEND)
-  // IEND is 00 00 00 00 49 45 4E 44 AE 42 60 82
-  const iendHeader = Buffer.from([0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44]);
-  const iendIdx = buffer.lastIndexOf(iendHeader);
-  
-  if (iendIdx === -1) return buffer; // broken png?
-  
-  return Buffer.concat([buffer.slice(0, iendIdx), chunk, buffer.slice(iendIdx)]);
-}
 
 // --- Settings Management ---
 const CONFIG_FILE = path.join(__dirname, 'config.json');
@@ -82,7 +51,7 @@ function loadConfig() {
             console.error('Failed to load config:', e);
         }
     }
-    return { debugMode: false };
+    return { debugMode: false, imageProvider: DEFAULT_ID };
 }
 
 function saveConfig(config) {
@@ -90,6 +59,51 @@ function saveConfig(config) {
 }
 
 let appConfig = loadConfig();
+if (!appConfig.imageProvider) appConfig.imageProvider = DEFAULT_ID;
+else {
+  const normalized = normalizeProviderId(appConfig.imageProvider);
+  if (normalized && normalized !== appConfig.imageProvider) {
+    appConfig.imageProvider = normalized;
+    saveConfig(appConfig);
+  }
+}
+
+function writeEnvKey(envPath, key, value) {
+  let envContent = '';
+  if (fs.existsSync(envPath)) {
+    envContent = fs.readFileSync(envPath, 'utf8');
+  }
+  const lines = envContent.split(/\r?\n/);
+  const prefix = `${key}=`;
+  let found = false;
+  const newLines = lines.map((line) => {
+    if (line.startsWith(prefix)) {
+      found = true;
+      return `${key}=${value}`;
+    }
+    return line;
+  });
+  if (!found) newLines.push(`${key}=${value}`);
+  fs.writeFileSync(envPath, newLines.join('\n'));
+}
+
+function apiKeyForProvider(providerId) {
+  if (providerId === 'ai_studio_nano_banana_pro') return process.env.GEMINI_API_KEY;
+  if (providerId === 'kie_nano_banana_pro') return process.env.KIE_AI_API_KEY;
+  return undefined;
+}
+
+function getEffectiveVendorJobLimits() {
+  return mergeVendorJobLimits(appConfig.vendorJobLimits || {}, listUniqueVendors());
+}
+
+function gateLimitsFromRow(row) {
+  return {
+    maxConcurrent: row.maxConcurrent,
+    maxStartsPerWindow: row.maxStartsPerWindow,
+    windowMs: row.windowMs
+  };
+}
 
 // Custom logger
 const logger = {
@@ -99,49 +113,63 @@ const logger = {
 };
 
 ipcMain.handle('get-settings', () => {
-    return { 
+    const gem = process.env.GEMINI_API_KEY;
+    const kie = process.env.KIE_AI_API_KEY;
+    return {
         debugMode: appConfig.debugMode,
         resolution: appConfig.resolution,
-        aspectRatio: appConfig.aspectRatio
+        aspectRatio: appConfig.aspectRatio,
+        imageProvider: normalizeProviderId(appConfig.imageProvider) || appConfig.imageProvider || DEFAULT_ID,
+        availableProviders: listProviders(),
+        vendorJobLimits: getEffectiveVendorJobLimits(),
+        hasGeminiApiKey: Boolean(gem && String(gem).trim()),
+        hasKieApiKey: Boolean(kie && String(kie).trim())
     };
 });
 
-ipcMain.handle('save-settings', async (event, { apiKey, debugMode, resolution, aspectRatio }) => {
-    // Save settings
+ipcMain.handle(
+  'save-settings',
+  async (event, { apiKey, kieApiKey, debugMode, resolution, aspectRatio, imageProvider, vendorJobLimits }) => {
+    if (vendorJobLimits != null && !validateVendorJobLimitsPayload(vendorJobLimits)) {
+      return { success: false, error: 'Invalid vendor job limit settings' };
+    }
+
     appConfig.debugMode = debugMode;
     if (resolution) appConfig.resolution = resolution;
     if (aspectRatio) appConfig.aspectRatio = aspectRatio;
-    
+    if (imageProvider && isValidProviderId(imageProvider)) {
+      appConfig.imageProvider = normalizeProviderId(imageProvider) || imageProvider;
+    }
+
+    if (vendorJobLimits != null) {
+      const known = listUniqueVendors();
+      const base = mergeVendorJobLimits(appConfig.vendorJobLimits || {}, known);
+      for (const v of known) {
+        const incoming = vendorJobLimits[v];
+        if (incoming && typeof incoming === 'object') {
+          base[v] = clampVendorLimitEntry({ ...base[v], ...incoming });
+        }
+      }
+      appConfig.vendorJobLimits = base;
+    }
+
     saveConfig(appConfig);
 
-    // Save API key if provided
+    const envPath = path.join(__dirname, '.env');
+
     if (apiKey && apiKey.trim()) {
-        const envPath = path.join(__dirname, '.env');
-        let envContent = '';
-        if (fs.existsSync(envPath)) {
-            envContent = fs.readFileSync(envPath, 'utf8');
-        }
-        
-        const lines = envContent.split(/\r?\n/);
-        let keyFound = false;
-        const newLines = lines.map(line => {
-            if (line.startsWith('GEMINI_API_KEY=')) {
-                keyFound = true;
-                return `GEMINI_API_KEY=${apiKey.trim()}`;
-            }
-            return line;
-        });
-        
-        if (!keyFound) {
-            newLines.push(`GEMINI_API_KEY=${apiKey.trim()}`);
-        }
-        
-        fs.writeFileSync(envPath, newLines.join('\n'));
-        process.env.GEMINI_API_KEY = apiKey.trim(); // Update in current process
+        writeEnvKey(envPath, 'GEMINI_API_KEY', apiKey.trim());
+        process.env.GEMINI_API_KEY = apiKey.trim();
     }
-    
+
+    if (kieApiKey && kieApiKey.trim()) {
+        writeEnvKey(envPath, 'KIE_AI_API_KEY', kieApiKey.trim());
+        process.env.KIE_AI_API_KEY = kieApiKey.trim();
+    }
+
     return { success: true };
-});
+  }
+);
 
 // --- Window Management ---
 function createWindow () {
@@ -225,180 +253,153 @@ ipcMain.handle('get-project-details', (event, title) => {
     return getProjectPaths(title);
 });
 
-ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, referenceImages, project }) => {
+ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, referenceImages, project, provider: providerFromPayload }) => {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('API Key is missing in .env file');
+    const providerId = providerFromPayload || process.env.IMAGE_PROVIDER || appConfig.imageProvider || DEFAULT_ID;
+    const provider = getProvider(providerId);
+
+    const vendorKey = provider.vendor || 'default';
+    let limitsRow = getEffectiveVendorJobLimits()[vendorKey];
+    if (!limitsRow) {
+      limitsRow = clampVendorLimitEntry({ ...FALLBACK_DEFAULT });
     }
 
-    const ai = new GoogleGenAI({ 
-      apiKey,
-      httpOptions: { timeout: 600000 } // 10 minutes timeout for large image generation
-    });
-    const model = 'gemini-3-pro-image-preview';
-    
-    // Config
-    const config = {
-      responseModalities: ['IMAGE'], // We only want image
-      imageConfig: {
-        imageSize: resolution, // '1K', '2K' etc
-        aspectRatio: ratio
-      }
-    };
+    return await withVendorJobGate(vendorKey, gateLimitsFromRow(limitsRow), async () => {
+      const { input: inputDir, output: outputDir } = getProjectPaths(project);
 
-    // Construct Parts
-    const parts = [];
-    
-    // Add text prompt
-    parts.push({ text: prompt });
+      const parts = provider.buildRequestParts(prompt, inputDir, referenceImages, {
+        warn: (msg) => logger.warn(msg)
+      });
 
-    // Add reference images
-    // Paths are now relative to the application root or project folder
-    // The reference images usually come from the current input directory
-    const { input: inputDir } = getProjectPaths(project);
-    
-    for (const ref of referenceImages) {
-        // ref should be { hash, mimeType, extension? }
-        const ext = ref.extension || mime.getExtension(ref.mimeType);
-        const filename = `${ref.hash}.${ext}`;
-        const filePath = path.join(inputDir, filename);
+      const apiKey = apiKeyForProvider(provider.id);
 
-        if (fs.existsSync(filePath)) {
-            const fileData = fs.readFileSync(filePath).toString('base64');
-             parts.push({
-                inlineData: {
-                    mimeType: ref.mimeType,
-                    data: fileData
-                }
-            });
-        } else {
-            logger.warn(`Reference image not found: ${filePath}`);
-            // Check global input dir as fallback?
-            // For now, strict project scope.
-        }
-    }
+      const kieUploadCache = provider.vendor === 'kie_ai' ? getKieUploadCache() : null;
 
-    const contents = parts;
+      const sendDebug = (label, data) => {
+        event.sender.send('debug-log', label, data);
+      };
 
-    // Send contents to renderer console for debugging
-    event.sender.send('debug-log', 'Contents being sent to Gemini:', JSON.stringify(contents, null, 2));
-
-    logger.log('Sending request to Gemini...');
-    // Send Request
-    const responseStream = await ai.models.generateContentStream({
-      model,
-      config,
-      contents,
-    });
-
-    let finalBuffer = null;
-    let finalMime = 'image/png'; // default assumption
-
-    logger.log('Reading stream...');
-    let collectedText = '';
-    for await (const chunk of responseStream) {
-        const cand = chunk.candidates?.[0];
-        if (cand?.content?.parts) {
-            for (const part of cand.content.parts) {
-                if (part.inlineData) {
-                    logger.log('Received image chunk.');
-                    const inlineData = part.inlineData;
-                    finalMime = inlineData.mimeType || 'image/png';
-                    finalBuffer = Buffer.from(inlineData.data || '', 'base64');
-                }
-                if (part.text) {
-                    collectedText += part.text;
-                }
-            }
-        }
-        if (finalBuffer) break;
-    }
-
-    if (!finalBuffer) {
-        if (collectedText) {
-            logger.error('API returned text instead of image:', collectedText);
-            event.sender.send('debug-log', 'API Response Text:', collectedText);
-        }
-        logger.error('No buffer received.');
-        throw new Error('No image data received from API.');
-    }
-
-    logger.log(`Image received. Size: ${finalBuffer.length}, Mime: ${finalMime}`);
-
-    // --- Convert to PNG if not already ---
-    if (finalMime !== 'image/png') {
-        logger.log(`Converting ${finalMime} to image/png...`);
+      const sendRequestLog = (msg) => {
         try {
-            const img = nativeImage.createFromBuffer(finalBuffer);
-            finalBuffer = img.toPNG();
-            finalMime = 'image/png';
-        } catch (convErr) {
-            logger.error('Conversion to PNG failed:', convErr);
-            // If conversion fails, we'll try to save with original format but metadata injection might be skipped if not PNG/JPEG
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('request-log', msg);
+          }
+        } catch (_) {
+          /* ignore */
         }
-    }
+      };
 
-    // --- Inject Metadata ---
-    // Data to save
-    // We only save minimal info: prompt, resolution, ratio, and reference hashes
-    const metaData = {
+      const { buffer, mimeType } = await provider.generateImage({
+        apiKey,
+        vendor: provider.vendor,
+        kieUploadCache,
         prompt,
         resolution,
         ratio,
-        referenceImages: referenceImages.map(ref => ({
-            hash: ref.hash,
-            mimeType: ref.mimeType
+        parts,
+        inputDir,
+        referenceImages,
+        logger,
+        sendDebug,
+        sendRequestLog,
+        pollIntervalMs: limitsRow.pollIntervalMs
+      });
+
+      const metaData = {
+        prompt,
+        resolution,
+        ratio,
+        provider: provider.id,
+        referenceImages: referenceImages.map((ref) => ({
+          hash: ref.hash,
+          mimeType: ref.mimeType
         }))
-    };
-    
-    const metaString = JSON.stringify(metaData);
-    const safeMetaString = Buffer.from(metaString).toString('base64');
+      };
 
-    let savedBuffer = finalBuffer;
-    const ext = 'png'; // Always png now
+      const fullPath = await finalizeAndSaveImage({
+        nativeImage,
+        piexif,
+        buffer,
+        mimeType,
+        metaData,
+        outputDir,
+        logger
+      });
 
-    try {
-        if (finalMime === 'image/png') {
-            logger.log('Injecting PNG metadata...');
-            savedBuffer = injectPngMetadata(finalBuffer, 'BananaAppMeta', safeMetaString);
-        } else if (finalMime === 'image/jpeg') {
-            // Fallback for JPEG if conversion failed but it was JPEG
-            logger.log('Injecting JPEG metadata (fallback)...');
-            const exifObj = {
-                "Exif": {
-                    [piexif.ExifIFD.UserComment]: "BananaAppMeta:" + safeMetaString
-                }
-            };
-            const exifBytes = piexif.dump(exifObj);
-            const newData = piexif.insert(exifBytes, finalBuffer.toString('binary'));
-            savedBuffer = Buffer.from(newData, 'binary');
-        }
-    } catch (metaErr) {
-        logger.error('Metadata injection failed, saving raw image:', metaErr);
-        // Fallback to original buffer if injection fails
-        savedBuffer = finalBuffer;
-    }
-
-    // Save to file
-    const fileName = `banana_${Date.now()}.${ext}`;
-    // Output path relative to app root or project
-    const { output: savePath } = getProjectPaths(project);
-    logger.log(`Saving to: ${savePath}`);
-    
-    await fs.promises.mkdir(savePath, { recursive: true });
-    
-    const fullPath = path.join(savePath, fileName);
-    await fs.promises.writeFile(fullPath, savedBuffer);
-    logger.log(`File written: ${fullPath}`);
-
-    return { success: true, path: fullPath };
-
+      return { success: true, path: fullPath };
+    });
   } catch (error) {
     logger.error(error);
-    return { success: false, error: error.message };
+    const out = { success: false, error: error.message };
+    if (error.kieTaskId) out.kieTaskId = error.kieTaskId;
+    return out;
   }
 });
+
+ipcMain.handle(
+  'kie-recover-task',
+  async (event, { taskId, prompt, resolution, ratio, referenceImages, project }) => {
+    try {
+      if (!taskId || typeof taskId !== 'string') {
+        return { success: false, error: 'taskId required' };
+      }
+      const apiKey = process.env.KIE_AI_API_KEY;
+      if (!apiKey || !String(apiKey).trim()) {
+        return { success: false, error: 'Kie.ai API key is missing' };
+      }
+
+      const vendorKey = 'kie_ai';
+      let limitsRow = getEffectiveVendorJobLimits()[vendorKey];
+      if (!limitsRow) {
+        limitsRow = clampVendorLimitEntry({ ...FALLBACK_DEFAULT });
+      }
+
+      return await withVendorJobGate(vendorKey, gateLimitsFromRow(limitsRow), async () => {
+        const rec = await kieProvider.fetchKieTaskRecordOnce(apiKey.trim(), taskId);
+        if (!rec.ok) {
+          return { success: false, error: rec.msg || 'Kie recordInfo failed' };
+        }
+
+        const { state, failMsg, resultJson } = rec.data;
+
+        if (state === 'fail') {
+          return { success: false, error: failMsg || 'Kie generation failed' };
+        }
+
+        if (state === 'success' && resultJson) {
+          const url = kieProvider.resultImageUrlFromRecordData(rec.data);
+          const { buffer, mimeType } = await kieProvider.downloadResult(url);
+          const { output: outputDir } = getProjectPaths(project);
+          const metaData = {
+            prompt,
+            resolution,
+            ratio,
+            provider: kieProvider.id,
+            referenceImages: (referenceImages || []).map((ref) => ({
+              hash: ref.hash,
+              mimeType: ref.mimeType
+            }))
+          };
+          const fullPath = await finalizeAndSaveImage({
+            nativeImage,
+            piexif,
+            buffer,
+            mimeType,
+            metaData,
+            outputDir,
+            logger
+          });
+          return { success: true, path: fullPath };
+        }
+
+        return { success: false, stillPending: true };
+      });
+    } catch (error) {
+      logger.error(error);
+      return { success: false, error: error.message };
+    }
+  }
+);
 
 ipcMain.handle('get-paths', () => {
     // Paths relative to app root
