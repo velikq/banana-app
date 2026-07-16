@@ -9,6 +9,7 @@ const piexif = require('piexifjs');
 let state = {
   resolution: '1K',
   aspectRatio: '1:1',
+  quality: null,
   imageProvider: 'ai_studio_nano_banana_pro',
   /** When set, metadata used this model but user kept a different current model */
   contextSourceProviderId: null,
@@ -40,12 +41,12 @@ let OUTPUT_DIR = null; // Track this too
 (async () => {
     try {
         await updatePaths();
-        log(`System ready. Input: ${INPUT_DIR}`);
         
         // Load settings
         const settings = await ipcRenderer.invoke('get-settings');
         if (settings.resolution) state.resolution = settings.resolution;
         if (settings.aspectRatio) state.aspectRatio = settings.aspectRatio;
+        if (settings.quality === 'basic' || settings.quality === 'high') state.quality = settings.quality;
         if (settings.imageProvider) state.imageProvider = settings.imageProvider;
         state.availableProviders = settings.availableProviders || [];
         
@@ -95,6 +96,10 @@ const els = {
   
   resGroup: document.getElementById('resolution-group'),
   ratioGroup: document.getElementById('ratio-group'),
+  qualityGroup: document.getElementById('quality-group'),
+  resolutionControl: document.getElementById('resolution-control'),
+  ratioControl: document.getElementById('ratio-control'),
+  qualityControl: document.getElementById('quality-control'),
   
   prompt: document.getElementById('prompt-input'),
   charCounter: document.getElementById('char-counter'),
@@ -122,9 +127,13 @@ const els = {
 
   libraryListInput: document.getElementById('library-list-input'),
   libraryCountInput: document.getElementById('library-count-input'),
+  inputLibraryHeader: document.getElementById('input-library-header'),
+  btnOpenInputFolder: document.getElementById('btn-open-input-folder'),
   
   libraryListOutput: document.getElementById('library-list-output'),
   libraryCountOutput: document.getElementById('library-count-output'),
+  outputLibraryHeader: document.getElementById('output-library-header'),
+  btnOpenOutputFolder: document.getElementById('btn-open-output-folder'),
   
   logs: document.getElementById('logs-output'),
 
@@ -243,21 +252,21 @@ function renderVendorLimitsPanel(limits) {
     const h = document.createElement('h4');
     h.textContent = VENDOR_LABELS[vendor] || vendor;
     section.appendChild(h);
-    appendVendorLimitField(section, vendor, 'maxConcurrent', 'Max concurrent jobs', row.maxConcurrent);
+    appendVendorLimitField(section, vendor, 'maxConcurrent', 'Макс. параллельных задач', row.maxConcurrent);
     appendVendorLimitField(
       section,
       vendor,
       'maxStartsPerWindow',
-      'Max job starts per window',
+      'Макс. запусков за окно',
       row.maxStartsPerWindow
     );
     const windowSec = Math.round((row.windowMs || 10000) / 1000);
-    appendVendorLimitField(section, vendor, 'windowSec', 'Window (seconds)', windowSec);
+    appendVendorLimitField(section, vendor, 'windowSec', 'Окно (секунды)', windowSec);
     appendVendorLimitField(
       section,
       vendor,
       'pollIntervalMs',
-      'Poll interval (ms)',
+      'Интервал опроса (мс)',
       row.pollIntervalMs
     );
     const pollHint = document.createElement('p');
@@ -265,8 +274,8 @@ function renderVendorLimitsPanel(limits) {
     pollHint.style.marginTop = '8px';
     pollHint.textContent =
       vendor === 'kie_ai'
-        ? 'Poll interval applies to Kie task status checks.'
-        : 'Poll interval reserved for future async use with this vendor.';
+        ? 'Интервал опроса применяется для проверки статуса задач Kie.'
+        : 'Интервал опроса зарезервирован для будущих асинхронных задач этого провайдера.';
     section.appendChild(pollHint);
     els.vendorLimitsContainer.appendChild(section);
   }
@@ -311,7 +320,7 @@ async function loadProjectsLibrary() {
         rootDiv.className = `library-item ${state.activeProject === null ? 'active-project' : ''}`;
         rootDiv.innerHTML = `
             <div style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; background:#222; color:#555; font-size:40px;">🏠</div>
-            <div class="project-title-overlay">Default</div>
+            <div class="project-title-overlay">Основной</div>
         `;
         rootDiv.addEventListener('click', () => switchProject(null));
         els.libraryListProjects.appendChild(rootDiv);
@@ -339,7 +348,7 @@ async function loadProjectsLibrary() {
         });
 
     } catch (e) {
-        log(`Error loading projects: ${e.message}`, 'error');
+        log(`Ошибка загрузки проектов: ${e.message}`, 'error');
     }
 }
 
@@ -356,7 +365,7 @@ async function switchProject(project) {
     // Re-render to set active class properly (easier than finding the element)
     await loadProjectsLibrary();
 
-    log(`Switched to project: ${project ? project.title : 'Default'}`);
+    log(`Выбран проект: ${project ? project.title : 'Основной'}`);
     
     // Update Paths
     await updatePaths();
@@ -418,18 +427,18 @@ async function loadProjectCreationGrid() {
             els.projectImageGrid.appendChild(div);
         });
     } catch (e) {
-        log(`Error loading grid: ${e.message}`, 'error');
+        log(`Ошибка загрузки списка: ${e.message}`, 'error');
     }
 }
 
 els.btnSaveProject.addEventListener('click', async () => {
     const title = els.projectTitleInput.value.trim();
     if (!title) {
-        alert('Please enter a title.');
+        alert('Введите название проекта.');
         return;
     }
     if (!newProjectSelectedImage) {
-        alert('Please select a preview image.');
+        alert('Выберите изображение для превью.');
         return;
     }
     
@@ -439,11 +448,11 @@ els.btnSaveProject.addEventListener('click', async () => {
     });
     
     if (result.success) {
-        log(`Project '${title}' created.`, 'success');
+        log(`Проект «${title}» создан.`, 'success');
         els.projectOverlay.classList.add('hidden');
         await loadProjectsLibrary();
     } else {
-        alert(`Failed to create project: ${result.error}`);
+        alert(`Не удалось создать проект: ${result.error}`);
     }
 });
 
@@ -518,7 +527,7 @@ function updateModelDisplayUICore() {
       state.contextSourceProviderId !== state.imageProvider;
     els.contextModelMismatch.classList.toggle('hidden', !show);
     if (show) {
-      els.contextModelUsedLabel.textContent = `Loaded context used: ${getProviderDisplayLabel(
+      els.contextModelUsedLabel.textContent = `Восстановленный контекст использовал: ${getProviderDisplayLabel(
         state.contextSourceProviderId
       )}`;
     }
@@ -568,6 +577,56 @@ function updateModelDisplayUI() {
   updateModelDisplayUICore();
 }
 
+const FALLBACK_CAPABILITIES = {
+  resolutions: ['1K', '2K', '4K'],
+  qualities: [],
+  ratios: ['1:1', '3:4', '4:3', '9:16', '16:9']
+};
+
+function getCurrentCapabilities() {
+  const provider = getProviderList().find((p) => p.id === state.imageProvider);
+  return provider?.capabilities || FALLBACK_CAPABILITIES;
+}
+
+function getAllowedResolutions(capabilities, ratio) {
+  const mode = state.references.length ? 'edit' : 'text';
+  return capabilities.resolutionRules?.[mode]?.[ratio] || capabilities.resolutions || [];
+}
+
+function renderOptionButtons(group, values, selected, labels = {}) {
+  if (!group) return;
+  group.innerHTML = '';
+  for (const value of values) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'option-btn';
+    button.dataset.value = value;
+    button.textContent = labels[value] || value;
+    button.classList.toggle('active', value === selected);
+    group.appendChild(button);
+  }
+}
+
+function syncGenerationControls() {
+  const capabilities = getCurrentCapabilities();
+  const ratios = capabilities.ratios?.length ? capabilities.ratios : FALLBACK_CAPABILITIES.ratios;
+  if (!ratios.includes(state.aspectRatio)) state.aspectRatio = ratios[0];
+
+  const resolutions = getAllowedResolutions(capabilities, state.aspectRatio);
+  if (resolutions.length && !resolutions.includes(state.resolution)) state.resolution = resolutions[0];
+
+  const qualities = capabilities.qualities || [];
+  if (qualities.length && !qualities.includes(state.quality)) state.quality = qualities[0];
+  if (!qualities.length) state.quality = null;
+
+  els.resolutionControl?.classList.toggle('hidden', resolutions.length === 0);
+  els.qualityControl?.classList.toggle('hidden', qualities.length === 0);
+  els.ratioControl?.classList.toggle('hidden', ratios.length === 0);
+  renderOptionButtons(els.resGroup, resolutions, state.resolution);
+  renderOptionButtons(els.ratioGroup, ratios, state.aspectRatio);
+  renderOptionButtons(els.qualityGroup, qualities, state.quality, { basic: 'Basic · 1K', high: 'High · 2K' });
+}
+
 // --- Settings Logic ---
 async function openSettings() {
     const settings = await ipcRenderer.invoke('get-settings');
@@ -608,10 +667,10 @@ async function saveSettings() {
             state.contextSourceProviderId = null;
         }
         updateModelDisplayUI();
-        log('Settings saved.', 'success');
+        log('Настройки сохранены.', 'success');
         closeSettings();
     } else {
-        log(`Failed to save settings: ${result.error}`, 'error');
+        log(`Не удалось сохранить настройки: ${result.error}`, 'error');
     }
 }
 
@@ -635,9 +694,10 @@ if (els.mainProviderSelect) {
         debugMode: els.debugCheckbox.checked
       });
     } catch (e) {
-      log(`Could not save model: ${e.message}`, 'warn');
+      log(`Не удалось сохранить модель: ${e.message}`, 'warn');
     }
     updateModelDisplayUI();
+    updateStateUI();
   });
 }
 
@@ -654,9 +714,9 @@ if (els.btnSwitchContextModel) {
       state.contextSourceProviderId = null;
       populateMainModelSelect();
       updateStateUI();
-      log(`Switched model to ${getProviderDisplayLabel(next)}`, 'success');
+      log(`Выбрана модель: ${getProviderDisplayLabel(next)}`, 'success');
     } catch (e) {
-      log(`Failed to switch model: ${e.message}`, 'error');
+      log(`Не удалось переключить модель: ${e.message}`, 'error');
     }
   });
 }
@@ -681,6 +741,7 @@ ipcRenderer.on('request-log', (event, msg) => {
 
 // --- UI Updates ---
 function updateStateUI() {
+  syncGenerationControls();
   // Resolution
   Array.from(els.resGroup.children).forEach(btn => {
     btn.classList.toggle('active', btn.dataset.value === state.resolution);
@@ -688,6 +749,9 @@ function updateStateUI() {
   // Ratio
   Array.from(els.ratioGroup.children).forEach(btn => {
     btn.classList.toggle('active', btn.dataset.value === state.aspectRatio);
+  });
+  Array.from(els.qualityGroup.children).forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.value === state.quality);
   });
   // Prompt
   els.prompt.value = state.prompt || '';
@@ -713,7 +777,7 @@ function renderRefList() {
       state.references.forEach((ref, idx) => {
         const container = document.createElement('div');
         container.className = 'ref-thumb-container';
-        container.title = 'Click to remove';
+        container.title = 'Нажмите, чтобы удалить';
         
         const img = document.createElement('img');
         img.src = `data:${ref.mimeType};base64,${ref.data}`;
@@ -774,7 +838,7 @@ function renderRequestList() {
         
         const promptEl = document.createElement('div');
         promptEl.className = 'request-prompt';
-        promptEl.textContent = req.prompt || '(No prompt)';
+        promptEl.textContent = req.prompt || '(Без промпта)';
         
         const metaEl = document.createElement('div');
         metaEl.className = 'request-meta';
@@ -786,12 +850,12 @@ function renderRequestList() {
         item.appendChild(iconDiv);
         item.appendChild(infoDiv);
 
-        if (req.status === 'error' && req.kieTaskId && req.provider === 'kie_nano_banana_pro') {
+        if (req.status === 'error' && req.kieTaskId && req.provider?.startsWith('kie_')) {
           const retryBtn = document.createElement('button');
           retryBtn.type = 'button';
           retryBtn.className = 'request-retry-btn';
           retryBtn.textContent = '🔄';
-          retryBtn.title = 'Check Kie task once';
+          retryBtn.title = 'Проверить статус задачи Kie';
           retryBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const res = await ipcRenderer.invoke('kie-recover-task', {
@@ -799,24 +863,26 @@ function renderRequestList() {
               prompt: req.prompt,
               resolution: req.resolution,
               ratio: req.ratio,
+              quality: req.quality,
               referenceImages: req.references.map((r) => ({
                 hash: r.hash,
                 mimeType: r.mimeType,
                 extension: r.extension
               })),
-              project: state.activeProject ? state.activeProject.title : null
+              project: state.activeProject ? state.activeProject.title : null,
+              provider: req.provider
             });
             if (res.success) {
               req.status = 'success';
               req.resultPath = res.path;
               req.kieTaskId = null;
               req.error = null;
-              log(`Request ${req.id} completed (retry).`, 'success');
+              log(`Запрос ${req.id} завершён после повторной проверки.`, 'success');
               loadOutputLibrary();
             } else if (res.stillPending) {
-              log(`Request ${req.id}: Kie task still processing.`, 'info');
+              log(`Запрос ${req.id}: задача Kie ещё выполняется.`, 'info');
             } else if (res.error) {
-              log(`Request ${req.id} retry: ${res.error}`, 'error');
+              log(`Повторная проверка запроса ${req.id}: ${res.error}`, 'error');
             }
             renderRequestList();
             if (state.currentRequestId === req.id) {
@@ -842,6 +908,7 @@ function selectRequest(id) {
     // Restore Context
     state.resolution = req.resolution;
     state.aspectRatio = req.ratio;
+    state.quality = req.quality || null;
     state.prompt = req.prompt;
     // Deep copy references to avoid mutation issues
     state.references = JSON.parse(JSON.stringify(req.references));
@@ -886,7 +953,7 @@ function updateMainView(req) {
              errEl.style.marginTop = '10px';
              els.placeholder.appendChild(errEl);
         }
-        errEl.textContent = req.error || 'Generation failed';
+        errEl.textContent = req.error || 'Генерация не удалась';
         els.placeholder.classList.remove('hidden');
     }
 }
@@ -929,13 +996,13 @@ async function loadOutputLibrary() {
                 if (res.success) {
                     loadOutputLibrary();
                 } else {
-                    log(`Failed to delete: ${res.error}`, 'error');
+                    log(`Не удалось удалить: ${res.error}`, 'error');
                 }
             });
             
             const topZone = document.createElement('div');
             topZone.className = 'lib-overlay-top';
-            topZone.textContent = 'Reference';
+            topZone.textContent = 'Референс';
             topZone.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 await addLibraryImageToReference(file.path);
@@ -943,7 +1010,7 @@ async function loadOutputLibrary() {
             
             const bottomZone = document.createElement('div');
             bottomZone.className = 'lib-overlay-bottom';
-            bottomZone.textContent = 'Context';
+            bottomZone.textContent = 'Контекст';
             bottomZone.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 // Load into main view by simulating a request or just restoring
@@ -980,7 +1047,7 @@ async function loadOutputLibrary() {
         els.libraryListOutput.appendChild(endBar);
 
     } catch (e) {
-        log(`Error loading output library: ${e.message}`, 'error');
+        log(`Ошибка загрузки результатов: ${e.message}`, 'error');
     }
 }
 
@@ -1021,7 +1088,7 @@ async function loadInputLibrary() {
                 if (res.success) {
                     loadInputLibrary();
                 } else {
-                    log(`Failed to delete: ${res.error}`, 'error');
+                    log(`Не удалось удалить: ${res.error}`, 'error');
                 }
             });
             
@@ -1051,7 +1118,7 @@ async function loadInputLibrary() {
         els.libraryListInput.appendChild(endBar);
 
     } catch (e) {
-        log(`Error loading input library: ${e.message}`, 'error');
+        log(`Ошибка загрузки входящих файлов: ${e.message}`, 'error');
     }
 }
 
@@ -1063,12 +1130,12 @@ async function addLibraryImageToReference(filePath) {
         const existingIdx = state.references.findIndex(r => r.hash === hash);
         if (existingIdx !== -1) {
             removeRef(existingIdx);
-            log('Removed from references.', 'info');
+            log('Референс удалён.', 'info');
             return;
         }
 
         if (state.references.length >= 9) {
-            log('Reference limit reached (9).', 'warn');
+            log('Достигнут лимит референсов (9).', 'warn');
             return;
         }
 
@@ -1092,18 +1159,88 @@ async function addLibraryImageToReference(filePath) {
         });
         
         updateStateUI();
-        log('Added to references.', 'success');
+        log('Референс добавлен.', 'success');
 
     } catch (err) {
-        log(`Failed to add reference: ${err.message}`, 'error');
+        log(`Не удалось добавить референс: ${err.message}`, 'error');
     }
 }
+
+async function importImagesToInput(files) {
+  if (!INPUT_DIR) {
+    log('Приложение инициализируется, подождите...', 'error');
+    return;
+  }
+
+  let imported = 0;
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue;
+    const filePath = getFilePath(file);
+    if (!filePath) {
+      log(`Не удалось определить путь к файлу: ${file.name}`, 'error');
+      continue;
+    }
+
+    const ext = path.extname(file.name).slice(1).toLowerCase();
+    if (!['png', 'jpg', 'jpeg'].includes(ext)) {
+      log(`Формат «${file.name}» пока не поддерживается. Используйте PNG или JPEG.`, 'warn');
+      continue;
+    }
+
+    try {
+      const buffer = fs.readFileSync(filePath);
+      const hash = crypto.createHash('md5').update(buffer).digest('hex');
+      const target = path.join(INPUT_DIR, `${hash}.${ext}`);
+      if (!fs.existsSync(target)) {
+        fs.writeFileSync(target, buffer);
+        imported++;
+      }
+    } catch (error) {
+      log(`Не удалось импортировать «${file.name}»: ${error.message}`, 'error');
+    }
+  }
+
+  if (imported) {
+    log(`Импортировано изображений: ${imported}.`, 'success');
+    await loadInputLibrary();
+  }
+}
+
+function setupInputLibraryDrop() {
+  if (!els.libraryListInput) return;
+  els.libraryListInput.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    els.libraryListInput.classList.add('drag-over');
+  });
+  els.libraryListInput.addEventListener('dragleave', () => {
+    els.libraryListInput.classList.remove('drag-over');
+  });
+  els.libraryListInput.addEventListener('drop', async (event) => {
+    event.preventDefault();
+    els.libraryListInput.classList.remove('drag-over');
+    await importImagesToInput(event.dataTransfer.files);
+  });
+}
+
+async function openLibraryFolder(kind) {
+  const result = await ipcRenderer.invoke(
+    'open-library-folder',
+    kind,
+    state.activeProject ? state.activeProject.title : null
+  );
+  if (!result.success) log(`Не удалось открыть папку: ${result.error}`, 'error');
+}
+
+els.inputLibraryHeader?.addEventListener('click', () => openLibraryFolder('input'));
+els.outputLibraryHeader?.addEventListener('click', () => openLibraryFolder('output'));
+setupInputLibraryDrop();
 
 // --- Interaction ---
 
 els.resetBtn.addEventListener('click', () => {
     state.resolution = '1K';
     state.aspectRatio = '1:1';
+    state.quality = null;
     state.references = [];
     state.prompt = '';
     state.contextSourceProviderId = null;
@@ -1124,7 +1261,7 @@ els.resetBtn.addEventListener('click', () => {
     
     updateStateUI();
     renderRequestList(); // to remove active selection
-    log('Context reset.');
+    log('Контекст сброшен.');
 });
 
 function getFilePath(file) {
@@ -1146,6 +1283,14 @@ els.ratioGroup.addEventListener('click', async e => {
     state.aspectRatio = e.target.dataset.value;
     updateStateUI();
     await ipcRenderer.invoke('save-settings', { aspectRatio: state.aspectRatio, debugMode: els.debugCheckbox.checked, imageProvider: state.imageProvider });
+  }
+});
+
+els.qualityGroup.addEventListener('click', async e => {
+  if (e.target.tagName === 'BUTTON') {
+    state.quality = e.target.dataset.value;
+    updateStateUI();
+    await ipcRenderer.invoke('save-settings', { quality: state.quality, debugMode: els.debugCheckbox.checked, imageProvider: state.imageProvider });
   }
 });
 
@@ -1171,7 +1316,7 @@ els.refDrop.addEventListener('drop', e => {
 
 async function handleRefFiles(files) {
   if (!INPUT_DIR) {
-      log('System initializing, please wait...', 'error');
+      log('Приложение инициализируется, подождите...', 'error');
       return;
   }
 
@@ -1181,7 +1326,7 @@ async function handleRefFiles(files) {
 
     const filePath = getFilePath(file);
     if (!filePath) {
-        log(`Could not determine path for file: ${file.name}`, 'error');
+        log(`Не удалось определить путь к файлу: ${file.name}`, 'error');
         continue;
     }
 
@@ -1200,7 +1345,7 @@ async function handleRefFiles(files) {
       }
       
       if (state.references.some(r => r.hash === hash)) {
-          log(`Image already added to references.`);
+          log('Изображение уже добавлено в референсы.');
           continue;
       }
 
@@ -1262,6 +1407,7 @@ async function restoreContext(filePath) {
       
       state.resolution = data.resolution || '1K';
       state.aspectRatio = data.ratio || '1:1';
+      state.quality = data.quality === 'basic' || data.quality === 'high' ? data.quality : null;
 
       let restoredProvider = data.provider;
       if (!restoredProvider || restoredProvider === 'gemini') {
@@ -1270,9 +1416,7 @@ async function restoreContext(filePath) {
       const list = getProviderList();
       const providerKnown = list.some((p) => p.id === restoredProvider);
 
-      if (providerKnown && restoredProvider !== state.imageProvider) {
-        state.contextSourceProviderId = restoredProvider;
-      } else if (providerKnown) {
+      if (providerKnown) {
         state.imageProvider = restoredProvider;
         state.contextSourceProviderId = null;
         populateMainModelSelect();
@@ -1343,7 +1487,7 @@ function readPngMetadata(buffer) {
 els.generateBtn.addEventListener('click', () => {
   const prompt = els.prompt.value.trim();
   if (!prompt) {
-    log('Please enter a prompt.', 'error');
+    log('Введите промпт.', 'error');
     return;
   }
 
@@ -1355,6 +1499,7 @@ els.generateBtn.addEventListener('click', () => {
       prompt: state.prompt,
       resolution: state.resolution,
       ratio: state.aspectRatio,
+      quality: state.quality,
       provider: state.imageProvider,
       // Deep copy refs
       references: JSON.parse(JSON.stringify(state.references)),
@@ -1373,12 +1518,13 @@ els.generateBtn.addEventListener('click', () => {
   renderRequestList();
   updateMainView(reqObj);
   
-  log(`Queued request: ${reqId}`);
+  log(`Запрос добавлен в очередь: ${reqId}`);
 
   const requestData = {
     prompt: reqObj.prompt,
     resolution: reqObj.resolution,
     ratio: reqObj.ratio,
+    quality: reqObj.quality,
     referenceImages: reqObj.references.map(r => ({ hash: r.hash, mimeType: r.mimeType, extension: r.extension })),
     project: state.activeProject ? state.activeProject.title : null,
     provider: reqObj.provider
@@ -1393,13 +1539,13 @@ els.generateBtn.addEventListener('click', () => {
         if (result.success) {
             r.status = 'success';
             r.resultPath = result.path;
-            log(`Request ${reqId} completed.`, 'success');
+            log(`Запрос ${reqId} завершён.`, 'success');
             loadOutputLibrary(); // Refresh library
         } else {
             r.status = 'error';
             r.error = result.error;
             r.kieTaskId = result.kieTaskId || null;
-            log(`Request ${reqId} failed: ${result.error}`, 'error');
+            log(`Ошибка запроса ${reqId}: ${result.error}`, 'error');
         }
         
         renderRequestList();
@@ -1414,7 +1560,7 @@ els.generateBtn.addEventListener('click', () => {
         
         r.status = 'error';
         r.error = err.message;
-        log(`Request ${reqId} crashed: ${err.message}`, 'error');
+        log(`Сбой запроса ${reqId}: ${err.message}`, 'error');
         
         renderRequestList();
         if (state.currentRequestId === reqId) {
@@ -1443,7 +1589,7 @@ document.getElementById('btn-close').addEventListener('click', () => {
 function updateConveyorStatusUI() {
     if (state.activeConveyor) {
         els.conveyorStatusBox.classList.remove('hidden');
-        els.conveyorPromptPreview.textContent = state.activeConveyor.prompt || '(No prompt)';
+        els.conveyorPromptPreview.textContent = state.activeConveyor.prompt || '(Без промпта)';
         els.conveyorCounter.textContent = `${state.activeConveyor.currentIdx} / ${state.activeConveyor.total}`;
     } else {
         els.conveyorStatusBox.classList.add('hidden');
@@ -1548,7 +1694,7 @@ async function loadConveyorLibrary() {
         allFiles.forEach(file => {
             const div = document.createElement('div');
             div.className = 'conveyor-lib-item';
-            div.title = "Click to add to selected list";
+            div.title = 'Нажмите, чтобы добавить в выбранный список';
             
             const img = document.createElement('img');
             img.src = `file://${file.path}`;
@@ -1559,7 +1705,7 @@ async function loadConveyorLibrary() {
             els.conveyorLibraryGrid.appendChild(div);
         });
     } catch (e) {
-        log(`Error loading conveyor library: ${e.message}`, 'error');
+        log(`Ошибка загрузки библиотеки пакета: ${e.message}`, 'error');
     }
 }
 
@@ -1582,7 +1728,7 @@ function updateConveyorDraftUI() {
         const img = document.createElement('img');
         img.src = `file://${file.path}`;
         img.className = 'mini-ref-thumb';
-        img.title = 'Click to remove';
+        img.title = 'Нажмите, чтобы удалить';
         img.addEventListener('click', (e) => {
             e.stopPropagation(); // prevent group selection if any
             state.conveyorDraft.generalRefs.splice(idx, 1);
@@ -1598,7 +1744,7 @@ function updateConveyorDraftUI() {
         const img = document.createElement('img');
         img.src = `file://${file.path}`;
         img.className = 'mini-ref-thumb';
-        img.title = 'Click to remove';
+        img.title = 'Нажмите, чтобы удалить';
         img.addEventListener('click', (e) => {
              e.stopPropagation(); // prevent group selection if any
             state.conveyorDraft.conveyorRefs.splice(idx, 1);
@@ -1612,11 +1758,11 @@ function updateConveyorDraftUI() {
 els.btnExecuteConveyor.addEventListener('click', () => {
     const prompt = els.conveyorPromptInput.value.trim();
     if (!prompt) {
-        alert('Please enter a general prompt.');
+        alert('Введите общий промпт.');
         return;
     }
     if (state.conveyorDraft.conveyorRefs.length === 0) {
-        alert('Please add at least one conveyor image.');
+        alert('Добавьте хотя бы одно изображение для пакетной обработки.');
         return;
     }
 
@@ -1643,7 +1789,7 @@ els.btnExecuteConveyor.addEventListener('click', () => {
     if (!state.isConveyorRunning) {
         processConveyorQueue();
     } else {
-        log('Conveyor queued.');
+        log('Пакет добавлен в очередь.');
     }
 });
 
@@ -1652,7 +1798,7 @@ async function processConveyorQueue() {
         state.isConveyorRunning = false;
         state.activeConveyor = null;
         updateConveyorStatusUI();
-        log('All conveyors finished.');
+        log('Все пакетные задачи завершены.');
         return;
     }
 
@@ -1661,7 +1807,7 @@ async function processConveyorQueue() {
     updateConveyorStatusUI();
 
     const conv = state.activeConveyor;
-    log(`Starting conveyor ${conv.id}. Tasks: ${conv.total}`);
+    log(`Запуск пакета ${conv.id}. Задач: ${conv.total}`);
 
     while (conv.currentIdx < conv.total) {
         // Check if still active (might be stopped by user)
@@ -1694,7 +1840,7 @@ async function processConveyorQueue() {
         updateConveyorStatusUI();
         
         try {
-            log(`Conveyor ${conv.id}: generating ${conv.currentIdx + 1}/${conv.total}...`);
+            log(`Пакет ${conv.id}: генерация ${conv.currentIdx + 1}/${conv.total}...`);
             const result = await ipcRenderer.invoke('generate-image', {
                 prompt: conv.prompt,
                 resolution: conv.resolution || '1K',
@@ -1705,13 +1851,13 @@ async function processConveyorQueue() {
             });
 
             if (result.success) {
-                log(`Conveyor item finished: ${path.basename(result.path)}`, 'success');
+                log(`Пакетная задача завершена: ${path.basename(result.path)}`, 'success');
                 loadOutputLibrary(); // Refresh library after each success
             } else {
-                log(`Conveyor item failed: ${result.error}`, 'error');
+                log(`Ошибка пакетной задачи: ${result.error}`, 'error');
             }
         } catch (err) {
-            log(`Conveyor item crashed: ${err.message}`, 'error');
+            log(`Сбой пакетной задачи: ${err.message}`, 'error');
         }
 
         conv.currentIdx++;
@@ -1725,7 +1871,7 @@ async function processConveyorQueue() {
 
 els.btnStopConveyor.addEventListener('click', () => {
     if (state.activeConveyor) {
-        if (confirm('Stop current conveyor?')) {
+        if (confirm('Остановить текущую пакетную задачу?')) {
             state.activeConveyor = null; // Break loop
             state.conveyorQueue.shift(); // Remove current
             state.isConveyorRunning = false;

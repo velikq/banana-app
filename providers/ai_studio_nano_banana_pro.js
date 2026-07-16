@@ -21,7 +21,7 @@ async function generateImage(ctx) {
   const { apiKey, resolution, ratio, parts, logger = {}, sendDebug } = ctx;
 
   if (!apiKey) {
-    throw new Error('API Key is missing in .env file');
+    throw new Error('Не задан API-ключ Google AI Studio');
   }
 
   const ai = new GoogleGenAI({
@@ -79,7 +79,7 @@ async function generateImage(ctx) {
       if (sendDebug) sendDebug('API Response Text:', collectedText);
     }
     logger.error?.('No buffer received.');
-    throw new Error('No image data received from API.');
+    throw new Error('API не вернуло данные изображения.');
   }
 
   logger.log?.(`Image received. Size: ${finalBuffer.length}, Mime: ${finalMime}`);
@@ -92,5 +92,10 @@ module.exports = {
   generateImage,
   id: 'ai_studio_nano_banana_pro',
   label: 'AI Studio — Nano Banana Pro (gemini-3-pro-image-preview)',
-  vendor: 'ai_studio'
+  vendor: 'ai_studio',
+  capabilities: {
+    resolutions: ['1K', '2K', '4K'],
+    qualities: [],
+    ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
+  }
 };

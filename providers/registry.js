@@ -1,11 +1,17 @@
 const aiStudioNanoBananaPro = require('./ai_studio_nano_banana_pro');
 const kieNanoBananaPro = require('./kie_nano_banana_pro');
+const kieNanoBanana2 = require('./kie_nano_banana_2');
+const kieGptImage2 = require('./kie_gpt_image_2');
+const kieSeedream5Pro = require('./kie_seedream_5_pro');
 
 const LEGACY_GEMINI_ID = 'gemini';
 
 const providers = {
   [aiStudioNanoBananaPro.id]: aiStudioNanoBananaPro,
-  [kieNanoBananaPro.id]: kieNanoBananaPro
+  [kieNanoBananaPro.id]: kieNanoBananaPro,
+  [kieNanoBanana2.id]: kieNanoBanana2,
+  [kieGptImage2.id]: kieGptImage2,
+  [kieSeedream5Pro.id]: kieSeedream5Pro
 };
 
 const DEFAULT_ID = aiStudioNanoBananaPro.id;
@@ -26,7 +32,8 @@ function listProviders() {
   return Object.values(providers).map((p) => ({
     id: p.id,
     label: p.label,
-    vendor: p.vendor
+    vendor: p.vendor,
+    capabilities: p.capabilities
   }));
 }
 

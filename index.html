@@ -9,7 +9,7 @@
   <!-- Custom Title Bar -->
   <div id="title-bar" class="title-bar">
     <div class="title-bar-text">
-      <i>banana.pots</i> pro-<span class="title-vip">vip</span>-delux edition
+      <i>banana.pots</i> pro-<span class="title-vip">vip</span> — премиум-версия
     </div>
     <div class="title-bar-controls">
       <button id="btn-settings" class="control-btn">⚙</button>
@@ -23,36 +23,36 @@
   <div id="settings-overlay" class="overlay hidden">
     <div class="overlay-content settings-overlay-wide">
       <div class="overlay-header">
-        <h3>Settings</h3>
+        <h3>Настройки</h3>
         <button id="btn-close-settings" class="close-overlay-btn">✕</button>
       </div>
       <div class="settings-tab-strip">
-        <button type="button" id="settings-tab-keys" class="settings-tab active">API keys</button>
-        <button type="button" id="settings-tab-limits" class="settings-tab">Request limits</button>
-        <button type="button" id="settings-tab-app" class="settings-tab">App</button>
+        <button type="button" id="settings-tab-keys" class="settings-tab active">Ключи API</button>
+        <button type="button" id="settings-tab-limits" class="settings-tab">Лимиты запросов</button>
+        <button type="button" id="settings-tab-app" class="settings-tab">Приложение</button>
       </div>
       <div class="overlay-body settings-overlay-body">
         <div id="settings-panel-keys" class="settings-panel">
           <div class="setting-item">
-            <label for="api-key-input">Google AI Studio API key (GEMINI_API_KEY):</label>
+            <label for="api-key-input">Ключ API Google AI Studio (GEMINI_API_KEY):</label>
             <input type="password" id="api-key-input" autocomplete="off">
           </div>
           <div class="setting-item">
-            <label for="kie-api-key-input">Kie.ai API key (KIE_AI_API_KEY):</label>
+            <label for="kie-api-key-input">Ключ API Kie.ai (KIE_AI_API_KEY):</label>
             <input type="password" id="kie-api-key-input" autocomplete="off">
           </div>
         </div>
         <div id="settings-panel-limits" class="settings-panel hidden">
-          <p class="settings-hint">Per vendor: concurrency, rate window, and poll interval (used by async providers such as Kie).</p>
+          <p class="settings-hint">Для каждого провайдера: параллельность, окно частоты запросов и интервал опроса.</p>
           <div id="vendor-limits-container"></div>
         </div>
         <div id="settings-panel-app" class="settings-panel hidden">
           <div class="setting-item checkbox-item">
             <input type="checkbox" id="debug-mode-checkbox">
-            <label for="debug-mode-checkbox">Debug Mode</label>
+            <label for="debug-mode-checkbox">Режим отладки</label>
           </div>
         </div>
-        <button id="btn-save-settings" class="primary-btn">Save Settings</button>
+        <button id="btn-save-settings" class="primary-btn">Сохранить настройки</button>
       </div>
     </div>
   </div>
@@ -61,20 +61,20 @@
   <div id="project-overlay" class="overlay hidden">
     <div class="overlay-content">
       <div class="overlay-header">
-        <h3>New Project</h3>
+        <h3>Новый проект</h3>
         <button id="btn-close-project" class="close-overlay-btn">✕</button>
       </div>
       <div class="overlay-body">
         <div class="setting-item">
-          <label for="project-title-input">Project Title:</label>
-          <input type="text" id="project-title-input" placeholder="Enter project title">
+          <label for="project-title-input">Название проекта:</label>
+          <input type="text" id="project-title-input" placeholder="Введите название проекта">
         </div>
         
-        <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 8px;">Select Preview Image:</label>
+        <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 8px;">Выберите превью:</label>
         <div class="project-creation-area">
             <div class="project-preview-selected">
                 <img id="project-new-preview-img" class="hidden">
-                <div id="project-new-preview-placeholder" class="placeholder-text">Select from right →</div>
+                <div id="project-new-preview-placeholder" class="placeholder-text">Выберите справа →</div>
             </div>
             <div class="project-image-selector">
                  <div id="project-image-grid" class="image-grid-3x9">
@@ -83,7 +83,7 @@
             </div>
         </div>
 
-        <button id="btn-save-project" class="primary-btn" style="margin-top: 20px;">Create Project</button>
+        <button id="btn-save-project" class="primary-btn" style="margin-top: 20px;">Создать проект</button>
       </div>
     </div>
   </div>
@@ -92,8 +92,8 @@
     <!-- Projects Library -->
     <div class="library-column">
         <div class="library-header">
-            <span class="icon">📂</span> PROJECTS
-            <button id="btn-add-project" class="add-btn" title="New Project">+</button>
+            <span class="icon">📂</span> ПРОЕКТЫ
+            <button id="btn-add-project" class="add-btn" title="Новый проект">+</button>
         </div>
         <div id="library-list-projects" class="library-list">
             <!-- Projects will be injected here -->
@@ -101,9 +101,10 @@
     </div>
 
     <!-- Input Library -->
-    <div class="library-column">
-        <div class="library-header">
-            <span class="icon">📂</span> INPUTS <span id="library-count-input" style="margin-left: auto; color: var(--text-secondary);">0</span>
+    <div id="input-library-column" class="library-column">
+        <div id="input-library-header" class="library-header" title="Открыть папку «Входящие»">
+            <button id="btn-open-input-folder" class="library-folder-btn" type="button" title="Открыть папку «Входящие»"><span class="icon">📂</span> ВХОДЯЩИЕ</button>
+            <span id="library-count-input" style="margin-left: auto; color: var(--text-secondary);">0</span>
         </div>
         <div id="library-list-input" class="library-list">
             <!-- Thumbnails will be injected here -->
@@ -117,14 +118,14 @@
       <div class="control-group">
         <div class="group-header">
           <span class="icon">📚</span>
-          <span>REFERENCE IMAGES</span>
+          <span>РЕФЕРЕНСЫ</span>
           <span id="ref-count" class="counter">0 / 9</span>
         </div>
         <div id="ref-drop-zone" class="drop-zone">
           <div id="ref-empty-state">
             <div class="upload-icon">↑</div>
-            <div class="upload-text">Add</div>
-            <div class="upload-subtext">Drag images here or click to upload.</div>
+            <div class="upload-text">Добавить</div>
+            <div class="upload-subtext">Перетащите изображения сюда или нажмите для загрузки.</div>
           </div>
           <div id="ref-list" class="ref-list hidden"></div>
         </div>
@@ -132,10 +133,10 @@
       </div>
 
       <!-- Resolution -->
-      <div class="control-group">
+      <div id="resolution-control" class="control-group">
         <div class="group-header">
           <span class="icon">⛶</span>
-          <span>Resolution</span>
+          <span>Разрешение</span>
         </div>
         <div class="button-group" id="resolution-group">
           <button class="option-btn active" data-value="1K">1K</button>
@@ -144,9 +145,18 @@
         </div>
       </div>
 
+      <!-- Quality (shown only by models that expose a quality setting) -->
+      <div id="quality-control" class="control-group hidden">
+        <div class="group-header">
+          <span class="icon">✦</span>
+          <span>Качество</span>
+        </div>
+        <div class="button-group" id="quality-group"></div>
+      </div>
+
       <!-- Aspect Ratio -->
-      <div class="control-group">
-        <div class="group-header">Aspect Ratio</div>
+      <div id="ratio-control" class="control-group">
+        <div class="group-header">Соотношение сторон</div>
         <div class="button-group" id="ratio-group">
           <button class="option-btn active" data-value="1:1">1:1</button>
           <button class="option-btn" data-value="3:4">3:4</button>
@@ -158,22 +168,22 @@
 
       <!-- Prompt -->
       <div class="control-group prompt-group">
-        <textarea id="prompt-input" placeholder="Describe your imagination..."></textarea>
-        <div class="char-count"><span id="char-counter">0</span> chars</div>
+        <textarea id="prompt-input" placeholder="Опишите желаемое изображение..."></textarea>
+        <div class="char-count"><span id="char-counter">0</span> символов</div>
         <div id="context-model-mismatch" class="context-model-mismatch hidden">
           <span id="context-model-used-label" class="context-model-used-label"></span>
-          <button type="button" id="btn-switch-context-model" class="secondary-btn context-switch-btn">Switch to that model</button>
+          <button type="button" id="btn-switch-context-model" class="secondary-btn context-switch-btn">Переключиться на эту модель</button>
         </div>
       </div>
 
       <!-- Restore Context -->
       <div id="restore-drop-zone" class="restore-zone">
         <span class="icon">↺</span>
-        <span>Drop image here to <span class="highlight">restore context</span></span>
+        <span>Перетащите изображение для <span class="highlight">восстановления контекста</span></span>
       </div>
 
       <button id="reset-btn" class="secondary-btn" style="width: 100%; margin-bottom: 10px; justify-content: center;">
-        <span class="icon">⟲</span> Reset Context
+        <span class="icon">⟲</span> Сбросить контекст
       </button>
 
       <!-- Generate Button -->
@@ -190,8 +200,8 @@
     <!-- Main Content -->
     <div class="main-content">
       <div id="result-model-bar" class="result-model-bar">
-        <label class="result-model-bar-label" for="main-provider-select">Current model</label>
-        <select id="main-provider-select" class="main-model-select" aria-label="Current model"></select>
+        <label class="result-model-bar-label" for="main-provider-select">Текущая модель</label>
+        <select id="main-provider-select" class="main-model-select" aria-label="Текущая модель"></select>
       </div>
       <div class="preview-area">
         <div class="info-tag hidden" id="preview-tag">1K • 1:1</div>
@@ -205,15 +215,15 @@
       </div>
 
       <div class="logs-area">
-        <div class="logs-header">>_ REQUEST LOGS</div>
-        <div id="logs-output" class="logs-output">Waiting for requests...</div>
+        <div class="logs-header">>_ ЖУРНАЛ ЗАПРОСОВ</div>
+        <div id="logs-output" class="logs-output">Ожидание запросов...</div>
       </div>
 
       <!-- Conveyor Area -->
       <div class="conveyor-area">
           <div id="conveyor-status-box" class="conveyor-status-box hidden">
               <div class="conveyor-info">
-                  <div id="conveyor-prompt-preview" class="conveyor-prompt-preview">Processing...</div>
+                  <div id="conveyor-prompt-preview" class="conveyor-prompt-preview">Выполняется...</div>
                   <div id="conveyor-counter" class="conveyor-counter">0/0</div>
               </div>
               <button id="btn-stop-conveyor" class="close-btn-small">✕</button>
@@ -223,9 +233,10 @@
     </div>
 
     <!-- Output Library -->
-    <div class="library-column">
-        <div class="library-header">
-            <span class="icon">📂</span> OUTPUTS <span id="library-count-output" style="margin-left: auto; color: var(--text-secondary);">0</span>
+    <div id="output-library-column" class="library-column">
+        <div id="output-library-header" class="library-header" title="Открыть папку «Результаты»">
+            <button id="btn-open-output-folder" class="library-folder-btn" type="button" title="Открыть папку «Результаты»"><span class="icon">📂</span> РЕЗУЛЬТАТЫ</button>
+            <span id="library-count-output" style="margin-left: auto; color: var(--text-secondary);">0</span>
         </div>
         <div id="library-list-output" class="library-list">
             <!-- Thumbnails will be injected here -->
@@ -238,14 +249,14 @@
   <div id="conveyor-overlay" class="overlay hidden">
     <div class="overlay-content large-overlay">
       <div class="overlay-header">
-        <h3>Conveyor Generation</h3>
+        <h3>Пакетная генерация</h3>
         <button id="btn-close-conveyor" class="close-overlay-btn">✕</button>
       </div>
       <div class="overlay-body conveyor-body">
         
         <!-- Left: Library -->
         <div class="conveyor-library-section">
-            <div class="section-label">Library (Inputs & Outputs)</div>
+            <div class="section-label">Библиотека (входящие и результаты)</div>
             <div id="conveyor-library-grid" class="conveyor-library-grid">
                 <!-- Items injected here -->
             </div>
@@ -257,7 +268,7 @@
             <div class="control-group">
                 <div class="group-header">
                 <span class="icon">⛶</span>
-                <span>Resolution</span>
+                <span>Разрешение</span>
                 </div>
                 <div class="button-group" id="conveyor-resolution-group">
                 <button class="option-btn active" data-value="1K">1K</button>
@@ -268,7 +279,7 @@
 
             <!-- Aspect Ratio -->
             <div class="control-group">
-                <div class="group-header">Aspect Ratio</div>
+                <div class="group-header">Соотношение сторон</div>
                 <div class="button-group" id="conveyor-ratio-group">
                 <button class="option-btn active" data-value="1:1">1:1</button>
                 <button class="option-btn" data-value="3:4">3:4</button>
@@ -279,21 +290,21 @@
             </div>
 
             <div class="control-group">
-                <label>General Prompt</label>
-                <textarea id="conveyor-prompt-input" placeholder="Enter general prompt..."></textarea>
+                <label>Общий промпт</label>
+                <textarea id="conveyor-prompt-input" placeholder="Введите общий промпт..."></textarea>
             </div>
             
             <div class="control-group selectable-group" id="group-gen-refs">
-                <label class="selection-label">General References <span id="conveyor-gen-ref-count">(0)</span></label>
+                <label class="selection-label">Общие референсы <span id="conveyor-gen-ref-count">(0)</span></label>
                 <div id="conveyor-gen-ref-list" class="mini-ref-list"></div>
             </div>
 
             <div class="control-group selectable-group" id="group-conv-refs">
-                <label class="selection-label">Conveyor Images <span id="conveyor-img-count">(0)</span></label>
+                <label class="selection-label">Изображения для пакета <span id="conveyor-img-count">(0)</span></label>
                 <div id="conveyor-img-list" class="mini-ref-list"></div>
             </div>
 
-            <button id="btn-execute-conveyor" class="primary-btn">Execute</button>
+            <button id="btn-execute-conveyor" class="primary-btn">Запустить</button>
         </div>
 
       </div>
@@ -302,24 +313,24 @@
 
   <!-- Conveyor Details Overlay (Overlay #1) -->
   <div id="conveyor-details-overlay" class="conveyor-details-overlay hidden">
-      <div class="details-header">Conveyor Details</div>
+      <div class="details-header">Детали пакета</div>
       <div class="details-section">
-          <div class="label">Prompt:</div>
+          <div class="label">Промпт:</div>
           <div id="details-prompt" class="details-text"></div>
       </div>
       <div class="details-section">
-          <div class="label">General Refs:</div>
+          <div class="label">Общие референсы:</div>
           <div id="details-gen-refs" class="details-thumbs"></div>
       </div>
       <div class="details-section">
-          <div class="label">Conveyor List:</div>
+          <div class="label">Список изображений:</div>
           <div id="details-conv-list" class="details-thumbs"></div>
       </div>
   </div>
 
   <!-- Conveyor Queue Overlay (Overlay #2) -->
   <div id="conveyor-queue-overlay" class="conveyor-queue-overlay hidden">
-      <div class="queue-header">Queue</div>
+      <div class="queue-header">Очередь</div>
       <div id="conveyor-queue-list" class="queue-list">
           <!-- Queue items injected here -->
       </div>

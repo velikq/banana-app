@@ -144,7 +144,7 @@ async function downloadResult(url) {
  * @param {(msg: string) => void} [ctx.sendRequestLog]
  * @param {number} [ctx.pollIntervalMs]
  */
-async function generateImage(ctx) {
+async function generateImageForModel(ctx, modelConfig) {
   const {
     apiKey,
     vendor,
@@ -152,6 +152,7 @@ async function generateImage(ctx) {
     prompt,
     resolution,
     ratio,
+    quality,
     inputDir,
     referenceImages,
     logger = {},
@@ -161,7 +162,7 @@ async function generateImage(ctx) {
   } = ctx;
 
   if (!apiKey) {
-    throw new Error('Kie.ai API key is missing (set KIE_AI_API_KEY in .env or Settings)');
+    throw new Error('Не задан API-ключ Kie.ai (KIE_AI_API_KEY)');
   }
 
   const imageUrls = await uploadReferenceImages({
@@ -174,13 +175,29 @@ async function generateImage(ctx) {
     sendRequestLog
   });
 
+  const isEdit = (referenceImages || []).length > 0;
+  if (isEdit && imageUrls.length === 0) {
+    throw new Error('Для редактирования в Kie требуется хотя бы один загруженный референс');
+  }
+
+  const generationOptions = modelConfig.normalizeOptions({
+    ratio,
+    resolution,
+    quality,
+    isEdit
+  });
+
   const body = {
-    model: 'nano-banana-pro',
+    model: isEdit ? modelConfig.editModel : modelConfig.textModel,
     input: {
-      prompt,
-      image_input: imageUrls,
-      aspect_ratio: mapAspectRatio(ratio),
-      resolution: mapResolution(resolution),
+      ...modelConfig.buildInput({
+        prompt,
+        imageUrls,
+        isEdit,
+        ratio: generationOptions.ratio,
+        resolution: generationOptions.resolution,
+        quality: generationOptions.quality
+      }),
       output_format: 'png'
     }
   };
@@ -190,21 +207,74 @@ async function generateImage(ctx) {
   }
 
   const taskId = await createTask(apiKey, body);
-  sendRequestLog?.(`Kie generation request sent (taskId=${taskId})`);
-  logger.log?.(`Kie task created: ${taskId}`);
+  const mode = isEdit ? 'image edit' : 'text to image';
+  sendRequestLog?.(`Kie ${mode} request sent (taskId=${taskId})`);
+  logger.log?.(`Kie ${mode} task created: ${taskId}`);
 
   const resultUrl = await pollUntilImageUrl(apiKey, taskId, logger, { pollIntervalMs });
-  return downloadResult(resultUrl);
+  return { ...(await downloadResult(resultUrl)), generationOptions };
 }
 
+/**
+ * Creates one UI-visible Kie provider. Its API model can still vary by whether
+ * reference images were supplied, so text-to-image and editing never need to
+ * appear as separate entries in the model selector.
+ */
+function createKieImageProvider(modelConfig) {
+  const { id, label, textModel, editModel, buildInput, capabilities, normalizeOptions } = modelConfig;
+  if (!id || !label || !textModel || !editModel || typeof buildInput !== 'function' || !capabilities || typeof normalizeOptions !== 'function') {
+    throw new Error('Invalid Kie image provider configuration');
+  }
+
+  return {
+    id,
+    label,
+    vendor: 'kie_ai',
+    capabilities,
+    buildRequestParts,
+    fetchKieTaskRecordOnce,
+    downloadResult,
+    resultImageUrlFromRecordData,
+    generateImage(ctx) {
+      return generateImageForModel(ctx, modelConfig);
+    }
+  };
+}
+
+const nanoBananaPro = createKieImageProvider({
+  id: 'kie_nano_banana_pro',
+  label: 'Kie.ai — Nano Banana Pro',
+  textModel: 'nano-banana-pro',
+  editModel: 'nano-banana-pro',
+  capabilities: {
+    resolutions: ['1K', '2K', '4K'],
+    qualities: [],
+    ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9', 'auto']
+  },
+  normalizeOptions({ ratio, resolution }) {
+    return {
+      ratio: mapAspectRatio(ratio),
+      resolution: mapResolution(resolution),
+      quality: null
+    };
+  },
+  buildInput({ prompt, imageUrls, ratio, resolution }) {
+    return {
+      prompt,
+      image_input: imageUrls,
+      aspect_ratio: ratio,
+      resolution,
+      output_format: 'png'
+    };
+  }
+});
+
 module.exports = {
+  ...nanoBananaPro,
   buildRequestParts,
-  generateImage,
   fetchKieTaskRecordOnce,
   downloadResult,
   resultImageUrlFromRecordData,
   KiePollTimeoutError,
-  id: 'kie_nano_banana_pro',
-  label: 'Kie.ai — Nano Banana Pro',
-  vendor: 'kie_ai'
+  createKieImageProvider
 };

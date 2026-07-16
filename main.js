@@ -19,14 +19,30 @@ const {
   validateVendorJobLimitsPayload,
   FALLBACK_DEFAULT
 } = require('./lib/vendorLimitsDefaults');
-const kieProvider = require('./providers/kie_nano_banana_pro');
-require('dotenv').config();
+
+// In a packaged app, all mutable user data lives in "data" next to the
+// installed .exe. In development it remains the project directory, so the
+// existing workflow and folders continue to work unchanged.
+const INSTALL_DIR = app.isPackaged ? path.dirname(process.execPath) : __dirname;
+const USER_DATA_DIR = app.isPackaged ? path.join(INSTALL_DIR, 'data') : INSTALL_DIR;
+const INPUT_DIR = path.join(USER_DATA_DIR, 'input');
+const OUTPUT_DIR = path.join(USER_DATA_DIR, 'output');
+const PROJECTS_DIR = path.join(USER_DATA_DIR, 'projects');
+const CONFIG_FILE = path.join(USER_DATA_DIR, 'config.json');
+const ENV_FILE = path.join(USER_DATA_DIR, '.env');
+const KIE_UPLOAD_CACHE_FILE = path.join(USER_DATA_DIR, 'kie-upload-cache.sqlite');
+
+for (const directory of [USER_DATA_DIR, INPUT_DIR, OUTPUT_DIR, PROJECTS_DIR]) {
+  fs.mkdirSync(directory, { recursive: true });
+}
+
+require('dotenv').config({ path: ENV_FILE });
 
 let kieUploadCacheSingleton = null;
 function getKieUploadCache() {
   if (!kieUploadCacheSingleton) {
     kieUploadCacheSingleton = new KieUploadCacheSqlite(
-      path.join(app.getPath('userData'), 'kie-upload-cache.sqlite')
+      KIE_UPLOAD_CACHE_FILE
     );
   }
   return kieUploadCacheSingleton;
@@ -41,8 +57,6 @@ app.commandLine.appendSwitch('disable-gpu-sandbox');
 app.commandLine.appendSwitch('disable-features', 'Autofill');
 
 // --- Settings Management ---
-const CONFIG_FILE = path.join(__dirname, 'config.json');
-
 function loadConfig() {
     if (fs.existsSync(CONFIG_FILE)) {
         try {
@@ -87,9 +101,9 @@ function writeEnvKey(envPath, key, value) {
   fs.writeFileSync(envPath, newLines.join('\n'));
 }
 
-function apiKeyForProvider(providerId) {
-  if (providerId === 'ai_studio_nano_banana_pro') return process.env.GEMINI_API_KEY;
-  if (providerId === 'kie_nano_banana_pro') return process.env.KIE_AI_API_KEY;
+function apiKeyForProvider(provider) {
+  if (provider.id === 'ai_studio_nano_banana_pro') return process.env.GEMINI_API_KEY;
+  if (provider.vendor === 'kie_ai') return process.env.KIE_AI_API_KEY;
   return undefined;
 }
 
@@ -119,6 +133,7 @@ ipcMain.handle('get-settings', () => {
         debugMode: appConfig.debugMode,
         resolution: appConfig.resolution,
         aspectRatio: appConfig.aspectRatio,
+        quality: appConfig.quality,
         imageProvider: normalizeProviderId(appConfig.imageProvider) || appConfig.imageProvider || DEFAULT_ID,
         availableProviders: listProviders(),
         vendorJobLimits: getEffectiveVendorJobLimits(),
@@ -129,7 +144,7 @@ ipcMain.handle('get-settings', () => {
 
 ipcMain.handle(
   'save-settings',
-  async (event, { apiKey, kieApiKey, debugMode, resolution, aspectRatio, imageProvider, vendorJobLimits }) => {
+  async (event, { apiKey, kieApiKey, debugMode, resolution, aspectRatio, quality, imageProvider, vendorJobLimits }) => {
     if (vendorJobLimits != null && !validateVendorJobLimitsPayload(vendorJobLimits)) {
       return { success: false, error: 'Invalid vendor job limit settings' };
     }
@@ -137,6 +152,7 @@ ipcMain.handle(
     appConfig.debugMode = debugMode;
     if (resolution) appConfig.resolution = resolution;
     if (aspectRatio) appConfig.aspectRatio = aspectRatio;
+    if (quality === 'basic' || quality === 'high') appConfig.quality = quality;
     if (imageProvider && isValidProviderId(imageProvider)) {
       appConfig.imageProvider = normalizeProviderId(imageProvider) || imageProvider;
     }
@@ -155,15 +171,13 @@ ipcMain.handle(
 
     saveConfig(appConfig);
 
-    const envPath = path.join(__dirname, '.env');
-
     if (apiKey && apiKey.trim()) {
-        writeEnvKey(envPath, 'GEMINI_API_KEY', apiKey.trim());
+        writeEnvKey(ENV_FILE, 'GEMINI_API_KEY', apiKey.trim());
         process.env.GEMINI_API_KEY = apiKey.trim();
     }
 
     if (kieApiKey && kieApiKey.trim()) {
-        writeEnvKey(envPath, 'KIE_AI_API_KEY', kieApiKey.trim());
+        writeEnvKey(ENV_FILE, 'KIE_AI_API_KEY', kieApiKey.trim());
         process.env.KIE_AI_API_KEY = kieApiKey.trim();
     }
 
@@ -173,9 +187,13 @@ ipcMain.handle(
 
 // --- Window Management ---
 function createWindow () {
+  const saved = appConfig.windowState || {};
+  const bounds = saved.bounds || {};
   const mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: Math.max(900, Number(bounds.width) || 1200),
+    height: Math.max(650, Number(bounds.height) || 800),
+    x: Number.isFinite(bounds.x) ? bounds.x : undefined,
+    y: Number.isFinite(bounds.y) ? bounds.y : undefined,
     frame: false, // Custom title bar
     backgroundColor: '#121212',
     webPreferences: {
@@ -185,6 +203,20 @@ function createWindow () {
   });
 
   mainWindow.loadFile('index.html');
+  mainWindow.once('ready-to-show', () => {
+    if (!appConfig.windowState || saved.maximized || saved.fullScreen) mainWindow.maximize();
+    else mainWindow.show();
+  });
+
+  mainWindow.on('close', () => {
+    const normalBounds = mainWindow.getNormalBounds();
+    appConfig.windowState = {
+      bounds: normalBounds,
+      maximized: mainWindow.isMaximized(),
+      fullScreen: false
+    };
+    saveConfig(appConfig);
+  });
   // mainWindow.webContents.openDevTools(); // Debugging
 
   // Window Control IPCs
@@ -239,13 +271,13 @@ function getProjectPaths(projectTitle) {
     const safeName = getSafeDirectoryName(projectTitle);
     if (!safeName) {
         return {
-            input: path.join(__dirname, 'input'),
-            output: path.join(__dirname, 'output')
+            input: INPUT_DIR,
+            output: OUTPUT_DIR
         };
     }
     return {
-        input: path.join(__dirname, 'input', safeName),
-        output: path.join(__dirname, 'output', safeName)
+        input: path.join(INPUT_DIR, safeName),
+        output: path.join(OUTPUT_DIR, safeName)
     };
 }
 
@@ -253,7 +285,7 @@ ipcMain.handle('get-project-details', (event, title) => {
     return getProjectPaths(title);
 });
 
-ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, referenceImages, project, provider: providerFromPayload }) => {
+ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, quality, referenceImages, project, provider: providerFromPayload }) => {
   try {
     const providerId = providerFromPayload || process.env.IMAGE_PROVIDER || appConfig.imageProvider || DEFAULT_ID;
     const provider = getProvider(providerId);
@@ -271,7 +303,7 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
         warn: (msg) => logger.warn(msg)
       });
 
-      const apiKey = apiKeyForProvider(provider.id);
+      const apiKey = apiKeyForProvider(provider);
 
       const kieUploadCache = provider.vendor === 'kie_ai' ? getKieUploadCache() : null;
 
@@ -289,13 +321,14 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
         }
       };
 
-      const { buffer, mimeType } = await provider.generateImage({
+      const { buffer, mimeType, generationOptions = {} } = await provider.generateImage({
         apiKey,
         vendor: provider.vendor,
         kieUploadCache,
         prompt,
         resolution,
         ratio,
+        quality,
         parts,
         inputDir,
         referenceImages,
@@ -307,8 +340,9 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
 
       const metaData = {
         prompt,
-        resolution,
-        ratio,
+        resolution: generationOptions.resolution || resolution,
+        ratio: generationOptions.ratio || ratio,
+        quality: generationOptions.quality || quality || null,
         provider: provider.id,
         referenceImages: referenceImages.map((ref) => ({
           hash: ref.hash,
@@ -338,7 +372,7 @@ ipcMain.handle('generate-image', async (event, { prompt, resolution, ratio, refe
 
 ipcMain.handle(
   'kie-recover-task',
-  async (event, { taskId, prompt, resolution, ratio, referenceImages, project }) => {
+  async (event, { taskId, prompt, resolution, ratio, quality, referenceImages, project, provider: providerId }) => {
     try {
       if (!taskId || typeof taskId !== 'string') {
         return { success: false, error: 'taskId required' };
@@ -349,13 +383,17 @@ ipcMain.handle(
       }
 
       const vendorKey = 'kie_ai';
+      const provider = getProvider(providerId);
+      if (provider.vendor !== vendorKey) {
+        return { success: false, error: 'Kie provider required' };
+      }
       let limitsRow = getEffectiveVendorJobLimits()[vendorKey];
       if (!limitsRow) {
         limitsRow = clampVendorLimitEntry({ ...FALLBACK_DEFAULT });
       }
 
       return await withVendorJobGate(vendorKey, gateLimitsFromRow(limitsRow), async () => {
-        const rec = await kieProvider.fetchKieTaskRecordOnce(apiKey.trim(), taskId);
+        const rec = await provider.fetchKieTaskRecordOnce(apiKey.trim(), taskId);
         if (!rec.ok) {
           return { success: false, error: rec.msg || 'Kie recordInfo failed' };
         }
@@ -367,14 +405,15 @@ ipcMain.handle(
         }
 
         if (state === 'success' && resultJson) {
-          const url = kieProvider.resultImageUrlFromRecordData(rec.data);
-          const { buffer, mimeType } = await kieProvider.downloadResult(url);
+          const url = provider.resultImageUrlFromRecordData(rec.data);
+          const { buffer, mimeType } = await provider.downloadResult(url);
           const { output: outputDir } = getProjectPaths(project);
           const metaData = {
             prompt,
             resolution,
             ratio,
-            provider: kieProvider.id,
+            quality: quality || null,
+            provider: provider.id,
             referenceImages: (referenceImages || []).map((ref) => ({
               hash: ref.hash,
               mimeType: ref.mimeType
@@ -402,12 +441,11 @@ ipcMain.handle(
 );
 
 ipcMain.handle('get-paths', () => {
-    // Paths relative to app root
     return {
-        documents: __dirname,
-        inputDir: path.join(__dirname, 'input'),
-        outputDir: path.join(__dirname, 'output'),
-        projectsDir: path.join(__dirname, 'projects')
+        documents: USER_DATA_DIR,
+        inputDir: INPUT_DIR,
+        outputDir: OUTPUT_DIR,
+        projectsDir: PROJECTS_DIR
     };
 });
 
@@ -465,7 +503,6 @@ ipcMain.handle('list-input-files', (event, project) => {
 });
 
 // --- Projects Logic ---
-const PROJECTS_DIR = path.join(__dirname, 'projects');
 const PROJECTS_FILE = path.join(PROJECTS_DIR, 'projects.json');
 
 function getProjectsData() {
@@ -493,8 +530,8 @@ ipcMain.handle('list-projects', () => {
 
 ipcMain.handle('create-project', async (event, { title, sourceImagePath }) => {
     try {
-        if (!title) throw new Error("Title is required");
-        if (!sourceImagePath) throw new Error("Preview image is required");
+        if (!title) throw new Error('Необходимо указать название проекта');
+        if (!sourceImagePath) throw new Error('Необходимо выбрать изображение для превью');
 
         // 1. Create Directories
         const { input: inputDir, output: outputDir } = getProjectPaths(title);
@@ -514,7 +551,7 @@ ipcMain.handle('create-project', async (event, { title, sourceImagePath }) => {
         // 3. Update JSON
         const projects = getProjectsData();
         if (projects.some(p => p.title === title)) {
-            throw new Error("Project with this title already exists");
+            throw new Error('Проект с таким названием уже существует');
         }
         
         projects.push({
@@ -530,4 +567,16 @@ ipcMain.handle('create-project', async (event, { title, sourceImagePath }) => {
         logger.error("Failed to create project:", err);
         return { success: false, error: err.message };
     }
+});
+
+ipcMain.handle('open-library-folder', async (event, kind, project) => {
+  const paths = getProjectPaths(project);
+  const folder = kind === 'output' ? paths.output : paths.input;
+  try {
+    fs.mkdirSync(folder, { recursive: true });
+    const error = await shell.openPath(folder);
+    return error ? { success: false, error } : { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 });

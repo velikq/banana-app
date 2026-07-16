@@ -10,6 +10,7 @@ Dense facts for this Electron app. No tutorial prose.
 | Provider registry | [`providers/registry.js`](providers/registry.js) — `getProvider`, `listProviders`, `listUniqueVendors`, `isValidProviderId`, `DEFAULT_ID`, `normalizeProviderId`, `LEGACY_GEMINI_ID` |
 | Google AI Studio (direct) | [`providers/ai_studio_nano_banana_pro.js`](providers/ai_studio_nano_banana_pro.js) — model `gemini-3-pro-image-preview`, `GEMINI_API_KEY`, `vendor: ai_studio` |
 | Kie.ai market API | [`providers/kie_nano_banana_pro.js`](providers/kie_nano_banana_pro.js) — model `nano-banana-pro`, `KIE_AI_API_KEY`, `vendor: kie_ai` |
+| Kie.ai model entries | [`providers/kie_nano_banana_2.js`](providers/kie_nano_banana_2.js), [`providers/kie_gpt_image_2.js`](providers/kie_gpt_image_2.js), [`providers/kie_seedream_5_pro.js`](providers/kie_seedream_5_pro.js) — text or image-edit API model is selected internally from whether references are attached |
 | Kie reference uploads + cache | [`lib/kieReferenceUpload.js`](lib/kieReferenceUpload.js) — `uploadReferenceImages` (globally serialized across concurrent Kie jobs) |
 | Vendor job limits (concurrency + rate) | [`lib/vendorJobGate.js`](lib/vendorJobGate.js) — `withVendorJobGate` |
 | Default / merge vendor limit rows | [`lib/vendorLimitsDefaults.js`](lib/vendorLimitsDefaults.js) — `mergeVendorJobLimits`, `clampVendorLimitEntry` |
@@ -39,13 +40,13 @@ Dense facts for this Electron app. No tutorial prose.
 
 ## Kie upload cache (SQLite)
 
-- **Path**: `path.join(app.getPath('userData'), 'kie-upload-cache.sqlite')` — opened lazily in [`main.js`](main.js) via `getKieUploadCache()` when `provider.vendor === 'kie_ai'`.
+- **Path**: `data/kie-upload-cache.sqlite` рядом с установленным `.exe` (в режиме разработки — в корне проекта) — открывается лениво в [`main.js`](main.js) через `getKieUploadCache()` при `provider.vendor === 'kie_ai'`.
 - **Schema**: composite PK `(vendor, api_key_hash, content_hash)`; columns `url`, `expires_at_ms`, `created_at_ms`.
 - **TTL**: Prefer `expiresAt` from Kie upload JSON when parseable; else default **2.5 days**. Entries are not reused within **1 hour** of recorded expiry (`SAFETY_BUFFER_MS` in [`kieUploadCacheSqlite.js`](lib/kieUploadCacheSqlite.js)).
 - **Prune**: `pruneExpired()` runs at the start of each `uploadReferenceImages` batch.
 - **Dedupe**: in-flight `Map` in [`kieReferenceUpload.js`](lib/kieReferenceUpload.js) so parallel jobs share one upload per `(vendor, apiKeyHash, contentHash)`.
 - **Serialization**: a module-level promise chain ensures **only one** `uploadReferenceImages` batch runs at a time (Kie cache workaround).
-- **Native module**: `better-sqlite3` must match Electron’s Node ABI. After `npm install`, run **`npm run rebuild:sqlite`** from the app root (uses `@electron/rebuild`).
+- **Implementation**: Node.js built-in `node:sqlite` (`DatabaseSync`). No native add-on or Electron ABI rebuild is required.
 
 ## Runtime
 
@@ -64,6 +65,7 @@ Dense facts for this Electron app. No tutorial prose.
 
 - **AI Studio**: `process.env.GEMINI_API_KEY` (`dotenv` + Settings).
 - **Kie.ai**: `process.env.KIE_AI_API_KEY`.
+- **Файл ключей**: `data/.env` рядом с установленным `.exe` (в режиме разработки — в корне проекта).
 - **Missing keys**: AI Studio → `API Key is missing in .env file`; Kie → `Kie.ai API key is missing (set KIE_AI_API_KEY in .env or Settings)`.
 
 ## Network
@@ -128,7 +130,7 @@ generateImage({
 
 ## Do not assume
 
-1. Kie `image_input` requires hosted URLs; refs are uploaded via Kie (base64 or stream) first; URLs may be cached in SQLite under `userData`.
+1. Kie `image_input` requires hosted URLs; refs are uploaded via Kie (base64 or stream) first; URLs may be cached in `data` рядом с установленным `.exe`.
 2. **`google api snippet.ts`** uses a role wrapper; AI Studio provider uses a flat Gemini `contents` array.
 
 ## Flow (mermaid)

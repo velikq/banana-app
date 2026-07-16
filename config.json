@@ -2,5 +2,16 @@
   "debugMode": false,
   "resolution": "2K",
   "aspectRatio": "3:4",
-  "imageProvider": "kie_nano_banana_pro"
+  "imageProvider": "kie_seedream_5_pro",
+  "quality": "basic",
+  "windowState": {
+    "bounds": {
+      "x": 680,
+      "y": 296,
+      "width": 1200,
+      "height": 800
+    },
+    "maximized": true,
+    "fullScreen": false
+  }
 }

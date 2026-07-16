@@ -26,7 +26,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 0 0 10px;
   -webkit-app-region: drag; /* Make draggable */
   border-bottom: 1px solid var(--border-color);
   user-select: none;
@@ -187,7 +187,37 @@ body {
 /* Buttons */
 .button-group {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.library-folder-btn {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: inherit;
+}
+
+#input-library-header,
+#output-library-header {
+  cursor: pointer;
+}
+
+.library-folder-btn:hover {
+  color: var(--accent-color);
+}
+
+.library-list.drag-over {
+  outline: 2px dashed var(--accent-color);
+  outline-offset: -4px;
+  background: rgba(255, 220, 0, 0.08);
+}
+
+#ratio-group .option-btn {
+  flex: 0 0 calc((100% - 32px) / 5);
 }
 
 .option-btn {
